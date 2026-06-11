@@ -1,0 +1,26 @@
+# --- Phase 1: order book logging ---
+ingest:
+  snapshot_interval_seconds: 60
+  market_filter:
+    tags: ["weather", "temperature"]
+
+# --- Phase 2: forecast layer ---
+forecast:
+  cities:            # start with cities that have active daily temp markets
+    - name: "New York"
+      station: "KNYC"
+    - name: "Denver"
+      station: "KDEN"
+  sources: ["nws", "gfs", "ecmwf"]
+  refresh_interval_minutes: 60
+
+# --- Phase 4: maker quoting ---
+quoting:
+  margin: 0.02       # quote at model price ± margin
+  max_position_usd: 25
+  max_open_orders_per_market: 4
+  min_edge_to_quote: 0.03
+  paper: true        # hard default; live requires explicit override
+
+storage:
+  db_path: "data/polybot.sqlite3"

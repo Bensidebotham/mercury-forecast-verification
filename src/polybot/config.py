@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from dotenv import load_dotenv
@@ -84,6 +85,10 @@ class Settings(BaseModel):
     quoting: QuotingConfig = QuotingConfig()
     paper: PaperConfig = PaperConfig()
     storage: dict = {"db_path": "data/polybot.sqlite3"}
+    # Market-data venue for paper trading. "us" = Polymarket US (the venue we
+    # would trade live, via signed gateway calls); "international" = the public
+    # gamma/clob endpoints.
+    data_source: Literal["us", "international"] = "us"
 
     @property
     def db_path(self) -> str:

@@ -25,7 +25,7 @@ _MONTHS = {
 }
 
 
-def _parse_event_title(title: str, year: int) -> tuple[str, str] | None:
+def parse_event_title(title: str, year: int) -> tuple[str, str] | None:
     """Return (city_text, YYYY-MM-DD) or None if not a daily-high event."""
     m = _EVENT_RE.match(title)
     if not m:
@@ -36,6 +36,15 @@ def _parse_event_title(title: str, year: int) -> tuple[str, str] | None:
     if not month:
         return None
     return city_text, f"{year:04d}-{month:02d}-{int(day):02d}"
+
+
+def build_alias_map(cities: list) -> dict[str, str]:
+    """Map each city alias (lowercased) to its canonical city name."""
+    alias_to_city: dict[str, str] = {}
+    for c in cities:
+        for a in c.aliases or [c.name]:
+            alias_to_city[a.lower()] = c.name
+    return alias_to_city
 
 
 def find_weather_markets(cities: list, limit: int = 50) -> list[dict]:
@@ -60,14 +69,11 @@ def find_weather_markets(cities: list, limit: int = 50) -> list[dict]:
         events = resp.json()
 
     year = datetime.now(timezone.utc).year
-    alias_to_city = {}
-    for c in cities:
-        for a in c.aliases or [c.name]:
-            alias_to_city[a.lower()] = c.name
+    alias_to_city = build_alias_map(cities)
 
     rows = []
     for ev in events:
-        parsed = _parse_event_title(ev.get("title", ""), year)
+        parsed = parse_event_title(ev.get("title", ""), year)
         if not parsed:
             continue
         city_text, target_date = parsed

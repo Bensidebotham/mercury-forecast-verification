@@ -31,6 +31,24 @@ def parse_bucket(question: str) -> tuple[float | None, float | None, str] | None
     return None
 
 
+# Polymarket US bucket labels ("titleShort"): "64 or below", "65 to 66",
+# "73 or above". Unit is always Fahrenheit for the US climate markets.
+_US_BELOW = re.compile(r"(\d+)\s*or\s*below", re.I)
+_US_ABOVE = re.compile(r"(\d+)\s*or\s*above", re.I)
+_US_RANGE = re.compile(r"(\d+)\s*to\s*(\d+)", re.I)
+
+
+def parse_us_bucket(label: str) -> tuple[float | None, float | None, str] | None:
+    """Parse (lo, hi, 'F') from a Polymarket US bucket label."""
+    if m := _US_BELOW.search(label):
+        return None, float(m.group(1)), "F"
+    if m := _US_ABOVE.search(label):
+        return float(m.group(1)), None, "F"
+    if m := _US_RANGE.search(label):
+        return float(m.group(1)), float(m.group(2)), "F"
+    return None
+
+
 def _norm_cdf(x: float) -> float:
     return 0.5 * (1 + math.erf(x / math.sqrt(2)))
 

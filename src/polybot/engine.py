@@ -15,7 +15,7 @@ from datetime import datetime
 from rich.console import Console
 
 from polybot import fees  # noqa: F401  (referenced by strategy modules)
-from polybot.clients import clob, gamma
+from polybot.clients.provider import build_data_provider
 from polybot.config import Settings
 from polybot.execution import paper
 from polybot.forecast import ensemble, nws, obs
@@ -31,6 +31,7 @@ console = Console()
 class PaperEngine:
     def __init__(self, settings: Settings):
         self.s = settings
+        self.data = build_data_provider(settings)
         self.conn = db.connect(settings.db_path)
         self.markets: dict[str, dict] = {}  # token_id -> market row
         self.members: dict[tuple[str, str], list[float]] = {}  # (city, date) -> members
@@ -75,13 +76,18 @@ class PaperEngine:
     # ---------- data refresh ----------
 
     def discover(self) -> None:
-        rows = gamma.find_weather_markets(self.s.forecast.cities)
+        rows = self.data.find_weather_markets(self.s.forecast.cities)
         for r in rows:
-            parsed = bucket_model.parse_bucket(r["question"])
-            if not parsed:
-                continue
-            lo, hi, unit = parsed
-            r.update({"bucket_lo": lo, "bucket_hi": hi, "unit": unit})
+            # Providers may pre-parse bucket bounds (US); otherwise parse the
+            # question (international).
+            if r.get("bucket_lo") is not None or r.get("bucket_hi") is not None:
+                lo, hi, unit = r["bucket_lo"], r["bucket_hi"], r["unit"]
+            else:
+                parsed = bucket_model.parse_bucket(r["question"])
+                if not parsed:
+                    continue
+                lo, hi, unit = parsed
+                r.update({"bucket_lo": lo, "bucket_hi": hi, "unit": unit})
             self.markets[r["token_id"]] = r
             db.upsert_market(
                 self.conn,
@@ -203,7 +209,7 @@ class PaperEngine:
 
             books: dict[str, dict] = {}
             for tid in token_ids:
-                book = clob.get_order_book(tid)
+                book = self.data.get_order_book(tid)
                 if book is not None:
                     books[tid] = book
                     stats["books"] += 1
@@ -308,7 +314,7 @@ class PaperEngine:
         if not rows:
             return 0
         by_token = {r["token_id"]: r for r in rows}
-        outcomes = gamma.get_event_resolutions([r["event_slug"] for r in rows])
+        outcomes = self.data.get_resolutions(rows)
         settled = 0
         for tid, outcome in outcomes.items():
             if outcome is None or tid not in by_token:

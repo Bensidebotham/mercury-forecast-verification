@@ -10,11 +10,15 @@ dependencies = [
     "typer",
     "rich",
     "python-dotenv",
+    "cryptography",  # Ed25519 request signing for the Polymarket US API
     # "py-clob-client",  # enable in phase 1 — verify v2 vs newer py-sdk first
 ]
 
 [project.scripts]
 polybot = "polybot.cli:app"
+
+[dependency-groups]
+dev = ["pytest"]
 
 [build-system]
 requires = ["hatchling"]

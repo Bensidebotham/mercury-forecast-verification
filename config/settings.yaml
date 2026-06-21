@@ -1,26 +1,87 @@
+# --- Cities: the 5 Polymarket US temperature cities (settlement stations pinned
+# from docs.polymarket.us Weather FAQs). aliases match international Gamma event
+# titles so paper trading can run on public intl data until the US API key lands.
+forecast:
+  cities:
+    # NOTE: intl markets resolve on Wunderground AIRPORT stations (NYC =
+    # LaGuardia). The Polymarket US venue uses KNYC Central Park + NWS CLI —
+    # when we switch venues, switch this station back to KNYC.
+    - name: "New York City"
+      station: "KLGA"
+      lat: 40.779
+      lon: -73.880
+      tz: "America/New_York"
+      unit: "F"
+      aliases: ["NYC", "New York City", "New York"]
+    - name: "San Francisco"
+      station: "KSFO"
+      lat: 37.620
+      lon: -122.365
+      tz: "America/Los_Angeles"
+      unit: "F"
+      aliases: ["San Francisco", "SF"]
+    - name: "Miami"
+      station: "KMIA"
+      lat: 25.788
+      lon: -80.317
+      tz: "America/New_York"
+      unit: "F"
+      aliases: ["Miami"]
+    - name: "Chicago"
+      station: "KMDW"
+      lat: 41.786
+      lon: -87.752
+      tz: "America/Chicago"
+      unit: "F"
+      aliases: ["Chicago"]
+    - name: "Los Angeles"
+      station: "KLAX"
+      lat: 33.938
+      lon: -118.389
+      tz: "America/Los_Angeles"
+      unit: "F"
+      aliases: ["Los Angeles", "LA"]
+  sources: ["nws", "openmeteo_ensemble"]
+  refresh_interval_minutes: 30
+  kernel_sigma_f: 1.5        # smoothing kernel width per ensemble member, °F
+  lock_hour_local: 18        # hard fallback: after this local hour, day is locked
+  # Plateau lock: the daily high is usually in by mid-afternoon. If the
+  # observed max hasn't risen in `plateau_hours` and it's past
+  # `earliest_lock_hour` local, treat the high as locked — this catches the
+  # window where the winning bucket is decided but the thin book is stale.
+  earliest_lock_hour: 14
+  plateau_hours: 2.0
+  # Jun-11 settlements showed airport-station obs match resolution within
+  # rounding — small buffer for missed peaks between hourly obs, no bias.
+  obs_buffer_f: 1.0
+  locked_bias_f: 0.0
+  locked_sigma_f: 0.75
+
 # --- Phase 1: order book logging ---
 ingest:
   snapshot_interval_seconds: 60
   market_filter:
-    tags: ["weather", "temperature"]
+    tags: ["weather"]
 
-# --- Phase 2: forecast layer ---
-forecast:
-  cities:            # start with cities that have active daily temp markets
-    - name: "New York"
-      station: "KNYC"
-    - name: "Denver"
-      station: "KDEN"
-  sources: ["nws", "gfs", "ecmwf"]
-  refresh_interval_minutes: 60
-
-# --- Phase 4: maker quoting ---
+# --- Paper trading (live trading does not exist in this codebase) ---
 quoting:
-  margin: 0.02       # quote at model price ± margin
-  max_position_usd: 25
-  max_open_orders_per_market: 4
-  min_edge_to_quote: 0.03
-  paper: true        # hard default; live requires explicit override
+  margin: 0.02               # maker quotes at model price +/- margin
+  max_position_usd: 10       # per-bucket cap (sized for the $100 bankroll plan)
+  max_event_usd: 25          # total exposure cap per city/date event
+  max_total_usd: 80          # global cap: total open cost basis (80% of bankroll)
+  max_open_orders_per_market: 2
+  min_edge_to_quote: 0.03    # taker: required model-vs-price edge net of fees
+  maker_fill_haircut: 0.5    # assume we capture only 50% of crossing flow
+  taker_theta: 0.05          # Polymarket US fee curve: fee = theta*C*p*(1-p)
+  maker_theta: -0.0125       # negative = rebate
+  use_calibration: true      # route model probs through learned win-rate curve
+  lock_in_only: true         # ONLY trade observation-locked buckets (speed edge)
+  paper: true                # hard default; live requires explicit override
 
 storage:
   db_path: "data/polybot.sqlite3"
+
+paper:
+  cycle_seconds: 60
+  discovery_interval_minutes: 30
+  starting_bankroll_usd: 100.0

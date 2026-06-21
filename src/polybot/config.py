@@ -54,6 +54,13 @@ class QuotingConfig(BaseModel):
     max_open_orders_per_market: int = 2
     min_edge_to_quote: float = 0.03
     maker_fill_haircut: float = 0.5
+    # Risk guards (post-mortem 2026-06-21): cap per-fill size so a sub-penny
+    # ask can't turn a $10 budget into a 10k-contract longshot, and refuse
+    # cheap longshots unless the model is near-certain (they historically
+    # won ~0% despite passing the edge filter).
+    max_contracts_per_fill: float = 500
+    min_taker_price: float = 0.02
+    longshot_prob_floor: float = 0.5
     taker_theta: float = 0.05
     maker_theta: float = -0.0125
     use_calibration: bool = True   # route model probs through learned win-rate curve

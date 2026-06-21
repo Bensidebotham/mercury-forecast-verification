@@ -3,13 +3,13 @@
 # titles so paper trading can run on public intl data until the US API key lands.
 forecast:
   cities:
-    # NOTE: intl markets resolve on Wunderground AIRPORT stations (NYC =
-    # LaGuardia). The Polymarket US venue uses KNYC Central Park + NWS CLI —
-    # when we switch venues, switch this station back to KNYC.
+    # Polymarket US settles NYC on KNYC (Central Park) + NWS CLI. We are now
+    # on the US venue (data_source: us), so observations read KNYC — using the
+    # LaGuardia airport station here biased obs up to 4.5F off settlement.
     - name: "New York City"
-      station: "KLGA"
+      station: "KNYC"
       lat: 40.779
-      lon: -73.880
+      lon: -73.969
       tz: "America/New_York"
       unit: "F"
       aliases: ["NYC", "New York City", "New York"]
@@ -49,8 +49,10 @@ forecast:
   # observed max hasn't risen in `plateau_hours` and it's past
   # `earliest_lock_hour` local, treat the high as locked — this catches the
   # window where the winning bucket is decided but the thin book is stale.
-  earliest_lock_hour: 14
-  plateau_hours: 2.0
+  # Tightened 2026-06-21 (post-mortem): the old 14:00 / 2h window locked the
+  # wrong bucket 1-4h before the true peak. 15:00 + 3h waits out late climbs.
+  earliest_lock_hour: 15
+  plateau_hours: 3.0
   # Jun-11 settlements showed airport-station obs match resolution within
   # rounding — small buffer for missed peaks between hourly obs, no bias.
   obs_buffer_f: 1.0
@@ -71,12 +73,19 @@ quoting:
   max_total_usd: 80          # global cap: total open cost basis (80% of bankroll)
   max_open_orders_per_market: 2
   min_edge_to_quote: 0.03    # taker: required model-vs-price edge net of fees
+  max_contracts_per_fill: 500  # post-mortem: cap size so cheap asks can't 10k a longshot
+  min_taker_price: 0.02      # below this, only buy if near-certain (longshot screen)
+  longshot_prob_floor: 0.5   # required model_prob to buy a sub-min_taker_price ask
   maker_fill_haircut: 0.5    # assume we capture only 50% of crossing flow
   taker_theta: 0.05          # Polymarket US fee curve: fee = theta*C*p*(1-p)
   maker_theta: -0.0125       # negative = rebate
   use_calibration: true      # route model probs through learned win-rate curve
   lock_in_only: true         # ONLY trade observation-locked buckets (speed edge)
   paper: true                # hard default; live requires explicit override
+
+# Market-data venue for paper trading: "us" (Polymarket US, signed) or
+# "international" (public gamma/clob). See clients/provider.py.
+data_source: us
 
 storage:
   db_path: "data/polybot.sqlite3"

@@ -105,6 +105,32 @@ def test_lock_in_config_toggles():
     assert cfg.lock_in_only is True
 
 
+def test_contract_cap_limits_size():
+    # cheap ask + deep book + confident model: budget/price would be 1000,
+    # but the per-fill contract cap clamps it.
+    book = {"best_ask": 0.01, "ask_depth": 100000, "best_bid": 0.005, "bid_depth": 100}
+    sig = taker_signal("tok", model_prob=0.90, book=book, cfg=CFG)
+    assert sig is not None and sig.side == "BUY"
+    assert sig.size == CFG.max_contracts_per_fill
+
+
+def test_longshot_screened_unless_confident():
+    # sub-min_taker_price ask with a low model prob: screened out despite edge.
+    book = {"best_ask": 0.01, "ask_depth": 5000, "best_bid": 0.005, "bid_depth": 100}
+    assert taker_signal("tok", model_prob=0.20, book=book, cfg=CFG) is None
+    # same cheap ask, but near-certain -> allowed
+    sig = taker_signal("tok", model_prob=0.60, book=book, cfg=CFG)
+    assert sig is not None and sig.side == "BUY"
+
+
+def test_normal_priced_buy_not_screened_or_capped():
+    # at/above min_taker_price the longshot screen and cap don't bite.
+    book = {"best_ask": 0.05, "ask_depth": 500, "best_bid": 0.04, "bid_depth": 100}
+    sig = taker_signal("tok", model_prob=0.20, book=book, cfg=CFG)
+    assert sig is not None and sig.side == "BUY"
+    assert sig.size == 200  # 10 / 0.05, under the 500 cap
+
+
 def test_plateau_lock_detection():
     from polybot.forecast.obs import is_plateaued
     import time as _t

@@ -37,7 +37,12 @@ def taker_signal(
     best_bid, bid_depth = book.get("best_bid"), book.get("bid_depth", 0)
 
     # BUY: pay ask, contract worth model_prob in expectation
-    if best_ask is not None and ask_depth > 0:
+    # Skip cheap longshots unless the model is near-certain: at sub-min_taker_price
+    # asks the edge filter passes on tiny model probs that historically won ~0%.
+    longshot = best_ask is not None and best_ask < cfg.min_taker_price
+    if best_ask is not None and ask_depth > 0 and not (
+        longshot and model_prob < cfg.longshot_prob_floor
+    ):
         fee = trade_fee(cfg.taker_theta, 1, best_ask)
         edge = model_prob - best_ask - fee
         if edge >= cfg.min_edge_to_quote:
@@ -45,6 +50,7 @@ def taker_signal(
             if event_budget_usd is not None:
                 budget = min(budget, event_budget_usd)
             size = min(ask_depth, budget / best_ask if best_ask > 0 else 0)
+            size = min(size, cfg.max_contracts_per_fill)  # hard contract cap
             if size >= 1:
                 return TakerSignal(token_id, "BUY", best_ask, float(int(size)), model_prob, edge)
 

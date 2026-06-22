@@ -118,6 +118,63 @@ def maker_report_cmd():
            f"open_positions={r['open_positions']}[/dim]")
 
 
+@app.command(name="rewards-gate")
+def rewards_gate():
+    """Phase-0 gate: confirm Polymarket US exposes liquidity-reward programs (/v1/incentives)."""
+    from polybot.clients.us import PolymarketUS
+
+    settings = load_settings()
+    client = PolymarketUS.from_env()
+    if client is None:
+        rprint("[red]No credentials — set POLYMARKET_KEY_ID / POLYMARKET_SECRET_KEY in .env[/red]")
+        raise typer.Exit(1)
+    rows = client.find_incentivized_markets(settings.rewards.discovery_limit)
+    if not rows:
+        rprint("[red]GATE FAILED: no open incentivized markets with reward params (spec §3).[/red]")
+        raise typer.Exit(1)
+    rprint(f"[bold]{len(rows)}[/bold] open incentivized markets with reward programs")
+    t = Table(title="Incentivized markets (sample)")
+    for col in ("category", "question", "pool$", "target_size", "period"):
+        t.add_column(col)
+    for r in rows[:15]:
+        rw = r["reward"]
+        t.add_row(r["category"], r["question"][:45], f"{rw['pool_usd']:.0f}",
+                  f"{rw['target_size']:.0f}", rw["period"])
+    rprint(t)
+    rprint("[green]GATE PASSED.[/green]")
+
+
+@app.command(name="rewards-run")
+def rewards_run(cycles: int = typer.Option(None, help="Stop after N cycles (default: forever)")):
+    """Run the incentive-program rewards-MM paper simulator."""
+    from polybot.rewards_engine import RewardsEngine
+
+    RewardsEngine(load_settings()).run(cycles=cycles)
+
+
+@app.command(name="rewards-report")
+def rewards_report_cmd():
+    """Net = reward range − adverse selection − fees for the rewards-MM run."""
+    from polybot.config import ROOT
+    from polybot.rewards_engine import rewards_report
+    from polybot.storage import db
+
+    settings = load_settings()
+    conn = db.connect(str(ROOT / settings.rewards.db_path))
+    r = rewards_report(conn)
+    rprint(f"[bold]Reward income (est):[/bold] "
+           f"${r['reward_pess']:+.2f} .. ${r['reward_opt']:+.2f}  [dim](pess..opt)[/dim]")
+    rprint(f"[bold]Adverse selection (inventory PnL):[/bold] ${r['adverse_selection_pnl']:+.2f}")
+    rprint(f"[dim]  of which settlement ${r['settlement_pnl']:+.2f}, "
+           f"unrealized ${r['unrealized']:+.2f}, fees ${r['fees_paid']:+.3f}[/dim]")
+    rprint(f"[bold cyan]NET:[/bold cyan] ${r['net_pess']:+.2f} .. ${r['net_opt']:+.2f}")
+    rprint(f"[dim]fills={r['fills']} open_positions={r['open_positions']}[/dim]")
+    if r["net_pess"] > 0:
+        rprint("[green]Pessimistic net > 0 — go/no-go gate would pass for this period.[/green]")
+    else:
+        rprint("[yellow]Pessimistic net <= 0 — gate not met.[/yellow]")
+
+
 @app.command()
 def dashboard(
     port: int = typer.Option(8787, help="Port for the local dashboard"),

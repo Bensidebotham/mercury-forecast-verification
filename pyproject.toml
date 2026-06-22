@@ -12,6 +12,7 @@ dependencies = [
     "python-dotenv",
     "cryptography",  # Ed25519 request signing for the Polymarket US API
     # "py-clob-client",  # enable in phase 1 — verify v2 vs newer py-sdk first
+    "pyarrow",
 ]
 
 [project.scripts]

@@ -1,0 +1,27 @@
+name: ingest
+on:
+  schedule:
+    - cron: "0 */3 * * *"   # every 3h; tighten later if useful
+  workflow_dispatch: {}
+permissions:
+  contents: write
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run polybot backfill-kalshi
+      - run: uv run polybot ingest-once
+      - run: uv run polybot export --out data/evaluations.parquet
+      # data/ is gitignored; the dashboard reads frontend/public/evaluations.json,
+      # so publish the JSON snapshot there (Vercel redeploys on push).
+      - run: cp data/evaluations.json frontend/public/evaluations.json
+      - name: Commit refreshed data
+        run: |
+          git config user.name  "mercury-bot"
+          git config user.email "mercury-bot@users.noreply.github.com"
+          git add frontend/public/evaluations.json || true
+          git commit -m "data: scheduled ingest $(date -u +%FT%TZ)" || echo "no changes"
+          git push

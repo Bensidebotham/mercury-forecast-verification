@@ -1,100 +1,79 @@
-# polymarket-bot
+# Mercury — Forecast vs. Market Verification Pipeline
 
-Paper-trading bot for Polymarket daily temperature markets, priced from public
-weather-model ensembles (open-meteo GFS+ECMWF members, debiased toward NWS
-point forecasts) with live station observations as a lock-in signal.
+**Can a calibrated weather model out-predict the betting market on daily city temperatures?**
 
-Strategy rationale: [docs/research-report.md](docs/research-report.md) and
-[docs/research-update-2026-06-10.md](docs/research-update-2026-06-10.md).
-TL;DR — liquidity is structurally undersupplied in low-probability weather
-buckets; an informed maker collects wide spreads plus maker rebates (and on
-Polymarket US, $1,000/day/event Climate liquidity rewards) by quoting them from
-a real forecast model.
+Mercury is a read-only Python data pipeline that ingests daily high-temperature **markets** from
+Kalshi and Polymarket plus multi-model weather **ensembles** (GFS + ECMWF via Open-Meteo, NWS, and
+live METAR station observations), unifies them into one normalized store, and benchmarks the
+**model-implied** probability against the **market-implied** probability for every market — scored
+against the official **NWS settlement** with Brier score, log-loss, and calibration, segmented by lead
+time. Results are published to a live dashboard.
 
-**Venue:** Polymarket US (CFTC-regulated; lists temperature markets for NYC,
-SF, Miami, Chicago, LA — settled on NWS CLI reports). Paper trading currently
-runs against the public *international* Gamma/CLOB feeds (same market
-structure, no auth needed); the US API client slots in once an API key exists.
+> **No trading is performed anywhere in this repo.** The deliverable is the measurement and the honest
+> result, not a strategy or a P&L. (Earlier trading experiments are parked in `legacy/`.)
 
-## Status
+**Live dashboard:** _(deploy `frontend/` to Vercel and paste the URL here)_
 
-| Piece | State |
-|-------|-------|
-| Market discovery (Gamma, 5 cities, bucket parsing) | **working** |
-| Forecast layer (open-meteo ensembles + NWS debias + METAR obs) | **working** |
-| Bucket probability model (kernel mixture, obs truncation, locked days) | **working, tested** |
-| Taker signals + maker quotes (US fee curve, exposure caps) | **working, tested** |
-| Paper engine (simulated fills, settlements, PnL, calibration log) | **working, tested** |
-| Live trading | **does not exist** (deliberately; gated on paper results) |
-| Market-making strategy (`strategy/market_maker.py`) | **sketched + tested** — see `docs/market-making-design.md` |
-| Rewards-MM simulator (Polymarket US incentive-program sports/esports markets) | **new** — `rewards-*` CLI; see `docs/superpowers/specs/2026-06-21-rewards-mm-simulator-design.md` (REVISION) |
+---
 
-## Usage
+## Data lineage
+
+```
+Kalshi /markets ............┐
+Polymarket Gamma/CLOB ......┼─▶ pipeline/ingest ─▶ verify_db ─▶ analysis/verification ─▶ export ─▶ frontend/public/evaluations.json
+Open-Meteo (GFS+ECMWF) .....┤      (run_once)      (vmarket /     (Brier / log-loss /     (Parquet      │
+NWS + METAR (observations) .┘                       vquote /       calibration by          + JSON)       ▼
+                                                    vpred)         lead time)                      Next.js dashboard (Vercel)
+```
+
+- **vmarket** — unified market registry across venues (`venue:external_id` key, bucket bounds, close time, settled outcome)
+- **vquote** — market-implied probability snapshots over time
+- **vpred** — model-implied probability snapshots over time (with lead-hours)
+
+Scoring pairs, for each settled market and target lead time, the model and market snapshots nearest
+that lead time with the realized outcome. Backfilling Kalshi's settlement history seeds outcomes
+immediately; live model-vs-market lead-time comparisons accrue forward as snapshotted markets settle.
+
+## Quickstart
 
 ```bash
 uv sync
-uv run polybot discover              # list active temperature bucket markets
-uv run polybot forecast --city NY    # model vs market, one city
-uv run polybot paper-run             # the loop: forecast -> signals -> paper fills
-uv run polybot paper-run --cycles 5  # bounded run
-uv run polybot log-books             # snapshot-only mode (no trading sim)
-uv run polybot report                # PnL, fills, measured spreads, calibration
-uv run polybot dashboard             # live web UI at http://127.0.0.1:8787
-uv run polybot rewards-gate          # Phase-0: confirm /v1/incentives exposes reward programs
-uv run polybot rewards-run           # simulate liquidity-rewards MM on incentivized markets
-uv run polybot rewards-report        # net = reward range − adverse selection − fees
-uv run pytest                        # tests
+uv run polybot backfill-kalshi   # seed settled markets (no auth needed)
+uv run polybot ingest-once       # one read-only ingestion cycle (model + market snapshots)
+uv run polybot verify-report     # model vs. market Brier/log-loss by lead time
+uv run polybot export            # write data/evaluations.{parquet,json}
+
+# dashboard
+cp data/evaluations.json frontend/public/evaluations.json
+cd frontend && npm install && npm run dev   # / = live state, /?sample=1 = illustrative sample
 ```
 
-Long-running setup (both survive closing the terminal):
-
-```bash
-nohup uv run polybot paper-run  >> data/paper-run.log  2>&1 &
-nohup uv run polybot dashboard  >> data/dashboard.log  2>&1 &
-# stop them later with: pkill -f "polybot (paper-run|dashboard)"
-```
-
-Run `paper-run` continuously (tmux/launchd) and check `report` daily. The
-calibration table (model prob vs settled outcomes) is the go/no-go gate for
-real money — target: several weeks of settlements with honest bins before
-funding anything.
+Scheduled ingestion runs via GitHub Actions (`.github/workflows/ingest.yml`, every 3h) and republishes
+`frontend/public/evaluations.json`, which the deployed dashboard reads.
 
 ## Layout
 
 ```
-config/settings.yaml      # cities/stations, model params, caps, fee thetas
 src/polybot/
-  config.py               # typed settings
-  clients/gamma.py        # market discovery (public, intl)
-  clients/clob.py         # order books (public, read-only)
-  forecast/ensemble.py    # open-meteo GFS+ECMWF members
-  forecast/nws.py         # NWS point forecast (debias anchor)
-  forecast/obs.py         # METAR running max + day-locked logic
-  model/buckets.py        # bucket parsing + probability model
-  strategy/signals.py     # taker entries net of US fees
-  strategy/maker.py       # two-sided quotes around model price
-  execution/paper.py      # simulated fills, settlements, positions
-  engine.py               # the cycle loop
-  analysis/edge.py        # PnL / spread / calibration reports
-  storage/db.py           # sqlite
-tests/                    # model, strategy, paper-engine tests
+  clients/kalshi.py        keyless Kalshi temperature-market client
+  clients/gamma.py         Polymarket market discovery (existing)
+  forecast/                Open-Meteo ensemble, NWS, METAR observations (existing)
+  model/buckets.py         bucket probability from ensemble members (existing)
+  model/kalshi_buckets.py  parse Kalshi strike labels
+  storage/verify_db.py     unified cross-venue SQLite store
+  pipeline/ingest.py       one read-only ingestion cycle
+  pipeline/backfill.py     Kalshi settlement-history backfill
+  pipeline/export.py       Parquet + JSON export
+  analysis/verification.py Brier / log-loss / calibration, model vs. market by lead time
+frontend/                  Next.js + Recharts dashboard
+legacy/                    parked trading experiments (not part of the pipeline)
 ```
 
-## Known model gaps (paper trading exists to measure these)
+## Tests
 
-- Hourly METAR maxima undershoot the official CLI daily max by ~1–2°F
-  (buffered/biased in config; learn the per-station correction from
-  settlements).
-- Coastal stations (KSFO, KLAX) run cooler than ensemble gridpoints; NWS
-  blend helps, but the marine-layer error will show up in calibration.
-- Maker fill simulation is optimistic about queue position (haircut applied);
-  real fill quality needs the live pilot to measure.
+`uv run pytest tests/ -q` — 33 passing (pure scoring/parsing/storage logic + ingestion binding).
 
-## Next steps
+## Honest evaluation
 
-1. Accumulate paper settlements; tune `obs_buffer_f`/`locked_bias_f`/sigma
-   from the calibration report.
-2. Polymarket US API client (needs API key from the account) — same interface
-   as `clients/gamma.py`/`clob.py`, swaps in for the live pilot.
-3. Per-station bias correction from logged forecast-vs-CLI pairs.
-4. Live pilot ($100, lock-in trades first) only after calibration passes.
+See [docs/EVALUATION.md](docs/EVALUATION.md) for the current sample size, the model-vs-market numbers,
+and the caveats. The finding is reported plainly whichever way it falls.

@@ -1,7 +1,7 @@
 [project]
 name = "polybot"
 version = "0.1.0"
-description = "Maker-side weather quoting bot for Polymarket temperature markets"
+description = "Mercury — weather forecast vs. prediction-market verification pipeline"
 requires-python = ">=3.12"
 dependencies = [
     "httpx",

@@ -96,6 +96,28 @@ CREATE TABLE IF NOT EXISTS maker_rewards (
     token_id   TEXT,
     est_reward REAL
 );
+CREATE TABLE IF NOT EXISTS reward_markets (
+    token_id     TEXT PRIMARY KEY,
+    event_slug   TEXT,
+    category     TEXT,
+    question     TEXT,
+    end_ts       REAL,
+    closed       INTEGER DEFAULT 0,
+    outcome      INTEGER,
+    tick_size    REAL,
+    pool_usd     REAL,               -- daily reward pool for this market's program
+    discount     REAL,               -- per-tick proximity discount factor
+    target_size  REAL,               -- aggregate qualifying-size threshold (contracts)
+    period       TEXT,               -- program period (e.g. "live", "day_of")
+    program_id   TEXT
+);
+CREATE TABLE IF NOT EXISTS reward_estimates (
+    ts       REAL,
+    token_id TEXT,
+    est_opt  REAL,
+    est_pess REAL
+);
+CREATE INDEX IF NOT EXISTS idx_rwd_est ON reward_estimates(token_id, ts);
 """
 
 
@@ -154,5 +176,39 @@ def insert_observation(conn, city: str, target_date: str, obs_max: float) -> Non
 def insert_model_prob(conn, token_id: str, prob: float, obs_max: float | None) -> None:
     conn.execute(
         "INSERT INTO model_probs VALUES (?,?,?,?)", (time.time(), token_id, prob, obs_max)
+    )
+    conn.commit()
+
+
+def upsert_reward_market(conn: sqlite3.Connection, row: dict) -> None:
+    """Persist a normalized reward-market row (reward params flattened)."""
+    r = row.get("reward") or {}
+    conn.execute(
+        """INSERT INTO reward_markets
+               (token_id, event_slug, category, question, end_ts, closed, tick_size,
+                pool_usd, discount, target_size, period, program_id)
+           VALUES (:token_id, :event_slug, :category, :question, :end_ts, :closed, :tick_size,
+                   :pool_usd, :discount, :target_size, :period, :program_id)
+           ON CONFLICT(token_id) DO UPDATE SET closed=:closed, tick_size=:tick_size,
+               pool_usd=:pool_usd, discount=:discount, target_size=:target_size,
+               period=:period, program_id=:program_id""",
+        {
+            "token_id": row["token_id"], "event_slug": row.get("event_slug", ""),
+            "category": row.get("category", ""), "question": row.get("question", ""),
+            "end_ts": row.get("end_ts"), "closed": int(row.get("closed", False)),
+            "tick_size": row.get("tick_size"),
+            "pool_usd": r.get("pool_usd"), "discount": r.get("discount"),
+            "target_size": r.get("target_size"), "period": r.get("period"),
+            "program_id": r.get("program_id"),
+        },
+    )
+    conn.commit()
+
+
+def insert_reward_estimate(conn: sqlite3.Connection, token_id: str,
+                           est_opt: float, est_pess: float) -> None:
+    conn.execute(
+        "INSERT INTO reward_estimates VALUES (?,?,?,?)",
+        (time.time(), token_id, est_opt, est_pess),
     )
     conn.commit()

@@ -114,12 +114,20 @@ class PaperConfig(BaseModel):
     starting_bankroll_usd: float = 100.0
 
 
+class VerifyConfig(BaseModel):
+    db_path: str = "data/verify.sqlite3"
+    lead_buckets: tuple[int, ...] = (72, 48, 24, 6)
+    kalshi_cities: list[str] = ["New York", "Los Angeles", "Chicago", "Miami", "Austin"]
+    include_polymarket: bool = True
+
+
 class Settings(BaseModel):
     ingest: IngestConfig = IngestConfig()
     forecast: ForecastConfig = ForecastConfig()
     quoting: QuotingConfig = QuotingConfig()
     paper: PaperConfig = PaperConfig()
     rewards: RewardsConfig = RewardsConfig()
+    verify: VerifyConfig = VerifyConfig()
     storage: dict = {"db_path": "data/polybot.sqlite3"}
     # Market-data venue for paper trading. "us" = Polymarket US (the venue we
     # would trade live, via signed gateway calls); "international" = the public

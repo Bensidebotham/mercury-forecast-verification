@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-06-21-rewards-mm-simulator-design.md`
 
+> **⚠ REVISED 2026-06-21 — repointed to live sports/esports reward programs.** The Phase-0 gate found reward params ARE exposed (via `/v1/incentives`), but the only live programs are fast in-play sports/esports, not slow markets. See the **REVISION** section of the spec. Net effect on the tasks below: discovery (Task 1) is rebuilt against `/v1/incentives`; the reward contract drops `max_spread`/`min_size` and adds `period`/`program_id`; `model/slowness.py` becomes `model/market_select.py` (select by active-program + book, not slowness); the reward sim uses `discount^ticks` with a `target_size` denominator floor. The controller supplies corrected per-task instructions at dispatch; treat the original task bodies below as superseded where they conflict with the spec revision.
+
 ---
 
 ## File Structure

@@ -194,3 +194,28 @@ Unit tests, matching the existing discipline (22 tests today):
 - Climate-category quoting (deferred; revisit after slow-market approach is validated).
 - Sports / crypto markets (rejected — see §1).
 - Capital scaling beyond the $100–500 probe (separate later decision).
+
+---
+
+## REVISION — 2026-06-21 (repoint to live sports/esports programs)
+
+**This revision supersedes the slow-market premise (§2, §5) and the reward schema (§6).** It is the result of the Phase-0 gate (§3), which surfaced two findings.
+
+### Phase-0 findings (live API, `api.polymarket.us` / `gateway.polymarket.us`)
+1. **Reward params ARE exposed** — not on the market object, but via a dedicated endpoint **`/v1/incentives`**, which returns `{"programs": [{"marketSlug": str, "timePeriods": [{programId, programType: "liquidityProgram", rewardPool, discountFactor, targetSize, period, status, start, end}]}]}`. The fields the simulator needs (`rewardPool`, `discountFactor`≈0.3, `targetSize`≈15k) are all present. So the gate-on-params **passes**.
+2. **But every live program is fast in-play sports/esports** — all 100 returned programs are esports/sports (Call of Duty `aec-cod-*`, ATP tennis), with `period: live`/`day_of` and pools $500–$2,000. **Zero** slow Politics/Macro/Culture programs are live. The endpoint returns a fixed 100, ignores paging and per-market filters. The docs' "$1,000/day/event Climate/Macro/Politics/Culture default-eligible" is **not reflected in the live API as of this date.**
+
+### Decision
+Repoint the simulator to the markets where rewards actually exist: **the live liquidity-program (sports/esports) markets.** The slow-market adverse-selection-avoidance premise is set aside (no live programs to validate against).
+
+### Revised objective (replaces §2)
+The fast in-play environment is *adverse-selection-heavy* — the opposite of the original thesis. So the simulator's purpose flips from "confirm rewards clear ≈0 adverse selection" to **"measure whether reward income beats adverse-selection losses in a hard, fast-fill environment."** A *negative* net is a legitimate, cheap finding (it would say rewards-MM here is unprofitable for a passive bot). **Go/no-go gate unchanged in form: `net_pess > 0` over a validation window** — but now an honest stress test rather than an expected pass.
+
+### Revised market selection (replaces §5)
+Selection is no longer by slowness. A market is a candidate iff it has an **active** liquidity program in `/v1/incentives` AND a live book. Cap to `max_markets` by reward attractiveness (e.g., highest `rewardPool`, or `rewardPool / targetSize`). A realized-midpoint-volatility metric is still computed **for reporting/attribution only** (to see how adverse selection scales with market speed) — it does NOT filter. The module formerly named `model/slowness.py` becomes **`model/market_select.py`** with `score_market(...)` / `select_markets(...)`.
+
+### Revised reward schema + sim (replaces §6 fields)
+Normalized `reward` contract becomes `{pool_usd, discount, target_size, period, program_id}` — **drop `max_spread` and `min_size`** (not part of the US scoring model). Per-market params come from `/v1/incentives` joined to market detail by `marketSlug`. The US scoring model: `score = discountFactor ^ (ticks_from_best) × size` (exponential in ticks, using `orderPriceMinTickSize`), reward = `pool × ourScore / max(targetSize, ourScore + competitorScore) × (seconds / period_seconds)`. The optimistic/pessimistic **range** (the §6 share-uncertainty honesty) is retained: optimistic competitor = observed in-band depth; pessimistic competitor = `targetSize`.
+
+### Affected plan tasks
+The implementation plan (`docs/superpowers/plans/2026-06-21-rewards-mm-slow-markets.md`) is revised accordingly: Task 1 discovery rebuilt against `/v1/incentives`; Task 3 `reward_markets` columns swap `max_spread/min_size` → `period/program_id`; Task 4 `slowness` → `market_select`; Task 5 reward range uses the US scoring model + the new param set; Task 6 engine selects active-program markets and expects frequent fills. Controller provides corrected per-task instructions at dispatch.

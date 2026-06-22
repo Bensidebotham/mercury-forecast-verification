@@ -27,6 +27,7 @@ structure, no auth needed); the US API client slots in once an API key exists.
 | Paper engine (simulated fills, settlements, PnL, calibration log) | **working, tested** |
 | Live trading | **does not exist** (deliberately; gated on paper results) |
 | Market-making strategy (`strategy/market_maker.py`) | **sketched + tested** — see `docs/market-making-design.md` |
+| Rewards-MM simulator (Polymarket US incentive-program sports/esports markets) | **new** — `rewards-*` CLI; see `docs/superpowers/specs/2026-06-21-rewards-mm-simulator-design.md` (REVISION) |
 
 ## Usage
 
@@ -39,7 +40,10 @@ uv run polybot paper-run --cycles 5  # bounded run
 uv run polybot log-books             # snapshot-only mode (no trading sim)
 uv run polybot report                # PnL, fills, measured spreads, calibration
 uv run polybot dashboard             # live web UI at http://127.0.0.1:8787
-uv run pytest                        # 22 tests
+uv run polybot rewards-gate          # Phase-0: confirm /v1/incentives exposes reward programs
+uv run polybot rewards-run           # simulate liquidity-rewards MM on incentivized markets
+uv run polybot rewards-report        # net = reward range − adverse selection − fees
+uv run pytest                        # tests
 ```
 
 Long-running setup (both survive closing the terminal):

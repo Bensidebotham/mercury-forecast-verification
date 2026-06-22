@@ -6,7 +6,7 @@ forecast:
     # Polymarket US settles NYC on KNYC (Central Park) + NWS CLI. We are now
     # on the US venue (data_source: us), so observations read KNYC — using the
     # LaGuardia airport station here biased obs up to 4.5F off settlement.
-    - name: "New York City"
+    - name: "New York"
       station: "KNYC"
       lat: 40.779
       lon: -73.969

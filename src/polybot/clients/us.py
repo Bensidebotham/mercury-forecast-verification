@@ -51,44 +51,39 @@ def _normalize_book(raw: dict) -> dict | None:
     }
 
 
-def _parse_reward_params(raw: dict) -> dict | None:
-    """Extract normalized liquidity-reward params, or None if not reward-eligible.
-
-    Key names below mirror the probe output (scripts/probe_rewards_api.py); update
-    them here if the live API differs. This is the ONLY API-shape-dependent code."""
-    rw = raw.get("rewards") if isinstance(raw, dict) else None
-    if not rw:
-        return None
+def _parse_program(tp: dict) -> dict | None:
+    """Normalized reward params from one /v1/incentives timePeriod, or None."""
     try:
         return {
-            "pool_usd": float(rw["dailyPoolUsd"]),
-            "discount": float(rw["discountFactor"]),
-            "target_size": float(rw["targetSize"]),
-            "max_spread": float(rw["maxSpread"]),
-            "min_size": float(rw["minSize"]),
+            "pool_usd": float(tp["rewardPool"]),
+            "discount": float(tp["discountFactor"]),
+            "target_size": float(tp["targetSize"]),
+            "period": tp.get("period", ""),
+            "program_id": tp.get("programId", ""),
         }
     except (KeyError, TypeError, ValueError):
         return None
 
 
-def _normalize_reward_market(raw: dict) -> dict | None:
-    """Map one raw market payload to the internal reward-market contract."""
-    slug = raw.get("slug")
+def _normalize_incentivized_market(detail: dict, reward: dict) -> dict | None:
+    """Join a market-detail payload with its reward params into the contract."""
+    slug = detail.get("slug")
     if not slug:
         return None
     end_ts = None
-    if raw.get("endDate"):
+    if detail.get("endDate"):
         end_ts = datetime.fromisoformat(
-            raw["endDate"].replace("Z", "+00:00")
+            detail["endDate"].replace("Z", "+00:00")
         ).timestamp()
     return {
         "token_id": slug,
-        "event_slug": raw.get("eventSlug", ""),
-        "category": raw.get("category", ""),
-        "question": raw.get("title", ""),
+        "event_slug": "",
+        "category": detail.get("category", ""),
+        "question": detail.get("title") or detail.get("question", ""),
         "end_ts": end_ts,
-        "closed": bool(raw.get("closed")),
-        "reward": _parse_reward_params(raw),
+        "closed": bool(detail.get("closed")),
+        "tick_size": float(detail.get("orderPriceMinTickSize") or 0.01),
+        "reward": reward,
     }
 
 
@@ -272,30 +267,58 @@ class PolymarketUS:
                 out[tid] = None
         return out
 
-    def find_category_markets(self, categories: list[str], limit: int = 100) -> list[dict]:
-        """Active reward-eligible markets in the given categories, normalized.
+    def get_incentive_programs(self) -> dict[str, dict]:
+        """marketSlug -> normalized reward params, for ACTIVE liquidity programs.
 
-        Returns rows in the internal reward-market contract; only rows with a
-        non-None ``reward`` and not ``closed`` are returned."""
-        rows: list[dict] = []
-        for cat in categories:
-            try:
-                r = self._get(
-                    "/v1/search",
-                    base=self._gateway_url,
-                    params={"query": cat, "category": cat, "limit": limit},
-                )
-                r.raise_for_status()
-                payload = r.json()
-            except (httpx.HTTPError, ValueError):
+        If a market has several active liquidity timePeriods, keep the
+        highest-pool one (we quote the richest program)."""
+        try:
+            r = self._get("/v1/incentives", base=self._base_url)
+            r.raise_for_status()
+            programs = r.json().get("programs", [])
+        except (httpx.HTTPError, ValueError):
+            return {}
+        out: dict[str, dict] = {}
+        for p in programs:
+            slug = p.get("marketSlug")
+            if not slug:
                 continue
-            raw_markets = payload.get("markets") or [
-                m for ev in payload.get("events", []) for m in (ev.get("markets") or [])
-            ]
-            for raw in raw_markets:
-                row = _normalize_reward_market(raw)
-                if row and row["reward"] is not None and not row["closed"]:
-                    rows.append(row)
+            best = None
+            for tp in p.get("timePeriods", []):
+                if tp.get("programType") != "liquidityProgram" or tp.get("status") != "active":
+                    continue
+                params = _parse_program(tp)
+                if params and (best is None or params["pool_usd"] > best["pool_usd"]):
+                    best = params
+            if best is not None:
+                out[slug] = best
+        return out
+
+    def _market_detail(self, slug: str) -> dict | None:
+        try:
+            r = self._get(f"/v1/market/slug/{slug}", base=self._gateway_url)
+            if r.status_code != 200:
+                return None
+            payload = r.json()
+            return payload.get("market", payload) if isinstance(payload, dict) else None
+        except (httpx.HTTPError, ValueError):
+            return None
+
+    def find_incentivized_markets(self, limit: int = 25) -> list[dict]:
+        """Active-program markets, richest pools first, joined to market detail.
+
+        Bounds HTTP: fetches programs once, ranks by pool, then fetches detail
+        only for the top `limit`. Returns normalized, non-closed reward-market rows."""
+        programs = self.get_incentive_programs()
+        ranked = sorted(programs.items(), key=lambda kv: -kv[1]["pool_usd"])[:limit]
+        rows: list[dict] = []
+        for slug, reward in ranked:
+            detail = self._market_detail(slug)
+            if detail is None:
+                continue
+            row = _normalize_incentivized_market(detail, reward)
+            if row and not row["closed"]:
+                rows.append(row)
         return rows
 
     def get_category_resolutions(self, token_ids: list[str]) -> dict[str, int | None]:

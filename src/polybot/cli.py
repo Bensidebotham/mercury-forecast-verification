@@ -173,6 +173,10 @@ def rewards_report_cmd():
         rprint("[green]Pessimistic net > 0 — go/no-go gate would pass for this period.[/green]")
     else:
         rprint("[yellow]Pessimistic net <= 0 — gate not met.[/yellow]")
+    rprint(f"[dim]NB: reward assumes live-program window = "
+           f"{settings.rewards.live_period_seconds:.0f}s (unverified assumption — scales reward "
+           f"linearly); reward is credited per resting cycle including fill cycles (upward bias). "
+           f"Treat the headline as optimistic until calibrated against a real settled program.[/dim]")
 
 
 @app.command()

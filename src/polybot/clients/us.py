@@ -51,6 +51,47 @@ def _normalize_book(raw: dict) -> dict | None:
     }
 
 
+def _parse_reward_params(raw: dict) -> dict | None:
+    """Extract normalized liquidity-reward params, or None if not reward-eligible.
+
+    Key names below mirror the probe output (scripts/probe_rewards_api.py); update
+    them here if the live API differs. This is the ONLY API-shape-dependent code."""
+    rw = raw.get("rewards") if isinstance(raw, dict) else None
+    if not rw:
+        return None
+    try:
+        return {
+            "pool_usd": float(rw["dailyPoolUsd"]),
+            "discount": float(rw["discountFactor"]),
+            "target_size": float(rw["targetSize"]),
+            "max_spread": float(rw["maxSpread"]),
+            "min_size": float(rw["minSize"]),
+        }
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _normalize_reward_market(raw: dict) -> dict | None:
+    """Map one raw market payload to the internal reward-market contract."""
+    slug = raw.get("slug")
+    if not slug:
+        return None
+    end_ts = None
+    if raw.get("endDate"):
+        end_ts = datetime.fromisoformat(
+            raw["endDate"].replace("Z", "+00:00")
+        ).timestamp()
+    return {
+        "token_id": slug,
+        "event_slug": raw.get("eventSlug", ""),
+        "category": raw.get("category", ""),
+        "question": raw.get("title", ""),
+        "end_ts": end_ts,
+        "closed": bool(raw.get("closed")),
+        "reward": _parse_reward_params(raw),
+    }
+
+
 def _event_to_rows(event: dict, alias_to_city: dict[str, str], year: int) -> list[dict]:
     """Expand one climate event into per-bucket market rows.
 
@@ -219,6 +260,51 @@ class PolymarketUS:
         """
         out: dict[str, int | None] = {}
         for tid in {r["token_id"] for r in rows}:
+            try:
+                r = self._get(f"/v1/market/slug/{tid}", base=self._gateway_url)
+                if r.status_code != 200:
+                    out[tid] = None
+                    continue
+                payload = r.json()
+                market = payload.get("market", payload) if isinstance(payload, dict) else {}
+                out[tid] = _parse_resolution(market)
+            except (httpx.HTTPError, ValueError):
+                out[tid] = None
+        return out
+
+    def find_category_markets(self, categories: list[str], limit: int = 100) -> list[dict]:
+        """Active reward-eligible markets in the given categories, normalized.
+
+        Returns rows in the internal reward-market contract; only rows with a
+        non-None ``reward`` and not ``closed`` are returned."""
+        rows: list[dict] = []
+        for cat in categories:
+            try:
+                r = self._get(
+                    "/v1/search",
+                    base=self._gateway_url,
+                    params={"query": cat, "category": cat, "limit": limit},
+                )
+                r.raise_for_status()
+                payload = r.json()
+            except (httpx.HTTPError, ValueError):
+                continue
+            raw_markets = payload.get("markets") or [
+                m for ev in payload.get("events", []) for m in (ev.get("markets") or [])
+            ]
+            for raw in raw_markets:
+                row = _normalize_reward_market(raw)
+                if row and row["reward"] is not None and not row["closed"]:
+                    rows.append(row)
+        return rows
+
+    def get_category_resolutions(self, token_ids: list[str]) -> dict[str, int | None]:
+        """Resolve outcomes for category markets by slug. None if unresolved.
+
+        Reuses the same single-market endpoint + decisive-price rule as
+        get_resolutions, but keyed off a flat token_id list."""
+        out: dict[str, int | None] = {}
+        for tid in set(token_ids):
             try:
                 r = self._get(f"/v1/market/slug/{tid}", base=self._gateway_url)
                 if r.status_code != 200:

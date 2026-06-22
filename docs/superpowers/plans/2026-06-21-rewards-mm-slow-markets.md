@@ -1184,6 +1184,19 @@ git commit -m "docs: document the rewards-MM simulator mode"
 
 ---
 
+## Phase 0 result: GATE FAILED (2026-06-21)
+
+Ran `scripts/probe_rewards_api.py` against the live gateway (`gateway.polymarket.us`) with valid credentials. **The API does NOT expose any liquidity-reward params.** Findings:
+
+- `/v1/search?query={politics,macro,election,fed rate,oscars,culture}` all return `200` with `events[].markets[]` carrying a real `category` field (`"politics"`, `"macro"`, `"sports"`, etc.) — so category discovery itself is viable. Politics and Macro events are returned (e.g. "Nevada Governor Election Winner" category `politics`, "June Unemployment Rate" category `macro`).
+- **No reward object anywhere.** An exhaustive walk of all 109 distinct keys across every search + `/v1/markets` payload surfaced only `feeCoefficient` (a *trading fee*, e.g. 0.05), `mainSpreadLine` (sports point-spread line), `orderPriceMinTickSize`, and `ticker`. No `rewards`, `dailyPoolUsd`/`pool_usd`, `targetSize`, `maxSpread` (maker), `minSize`, `discountFactor`, or any incentive/liquidity/maker/rebate field exists on events or markets.
+- The dedicated endpoints `/v1/rewards` and `/v1/incentives/liquidity` both return **404** (`{"code":5,"message":"The server was unable to process your request."}`).
+- The only "spread"/"reward"-ish tokens in the blobs are sports betting terms (`SPORTS_MARKET_TYPE_SPREAD`, `game-lines/spread/*`, `soccer_team_*_spread`), unrelated to liquidity rewards.
+
+**Conclusion (spec §3 hard gate):** the $1,000/day/event reward pool params the simulator needs are not observable via this API. The normalizers (`_parse_reward_params`/`_normalize_reward_market`) and discovery methods were still implemented and unit-tested against the assumed/synthetic shape (the contract is correct), but `find_category_markets` will return **zero** reward-eligible rows against the live API because every market's `_parse_reward_params` yields `None`. **Tasks 2–8 are BLOCKED** until either (a) the reward params are exposed via an authenticated/different endpoint we haven't found, or (b) reward params are sourced out-of-band (docs/manual config) and the contract is fed from there instead of the API. Do not build the rest of the simulator assuming reward fields exist on the public payloads.
+
+---
+
 ## Self-Review notes
 
 - **Spec coverage:** §3 Phase-0 gate → Task 1 + `rewards-gate` (Task 7). §4 components → reused (`market_maker.py`, `paper.py`, `db.py`) + new (`slowness.py` Task 4, `rewards_engine.py` Task 6). §5 market selection → Task 4. §6 reward sim + **share range** → Task 5 (`estimate_reward_range`) reusing the existing `estimate_reward`. §7 quoting policy → reuses `maker_quotes(model_prob=None)`. §8 adverse-selection accounting → `paper.check_maker_fills`/`settle_market`, surfaced in `rewards_report`. §9 reporting/go-no-go → Task 7 `rewards-report` (`net_pess > 0` gate). §10 testing → Tasks 1,4,5,6. §11 out-of-scope (no live orders) → engine is read-only + paper only.

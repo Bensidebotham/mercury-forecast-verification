@@ -128,3 +128,56 @@ def estimate_reward(
     total = our_score + max(0.0, competitor_depth)
     share = our_score / total
     return share * daily_pool_usd * (seconds / 86400.0)
+
+
+def _ticks_from_best(price: float, best: float | None, tick_size: float) -> int | None:
+    """Number of price ticks between an order and the best price on its side."""
+    if best is None or tick_size <= 0:
+        return None
+    return round(abs(price - best) / tick_size)
+
+
+def _us_score(quotes: list[MMQuote], book: dict, discount: float, tick_size: float) -> float:
+    """Polymarket US resting-order score: size × discount^(ticks from best),
+    summed across both sides. Requires a two-sided quote (else 0)."""
+    if not {"BUY", "SELL"} <= {q.side for q in quotes}:
+        return 0.0
+    score = 0.0
+    for q in quotes:
+        best = book.get("best_bid") if q.side == "BUY" else book.get("best_ask")
+        ticks = _ticks_from_best(q.price, best, tick_size)
+        if ticks is None:
+            continue
+        score += q.size * (discount ** ticks)
+    return score
+
+
+def estimate_reward_range(
+    quotes: list[MMQuote],
+    book: dict,
+    params: dict,
+    tick_size: float,
+    seconds: float,
+    opt_factor: float,
+    pess_factor: float,
+    period_seconds: float = 86400.0,
+) -> tuple[float, float]:
+    """(optimistic, pessimistic) reward for a two-sided quote under the Polymarket US
+    scoring model: reward = pool × ourScore / max(targetSize, ourScore + competitorScore)
+    × (seconds / period_seconds), where ourScore = Σ size × discount^ticks_from_best.
+
+    The competing qualifying size is unobservable (spec §6), so we bracket it:
+      - optimistic: competitor = observed top-of-book depth × opt_factor (light)
+      - pessimistic: competitor = max(target_size, observed depth) × pess_factor (heavy)
+    The target_size term is a denominator FLOOR: a lone tiny maker cannot capture the
+    whole pool. Returns (opt, pess) with opt >= pess >= 0."""
+    our = _us_score(quotes, book, params["discount"], tick_size)
+    if our <= 0:
+        return 0.0, 0.0
+    pool = params["pool_usd"]
+    target = params["target_size"]
+    observed = (book.get("bid_depth", 0.0) or 0.0) + (book.get("ask_depth", 0.0) or 0.0)
+    frac = seconds / period_seconds
+    opt = pool * our / max(target, our + observed * opt_factor) * frac
+    pess = pool * our / max(target, our + max(target, observed) * pess_factor) * frac
+    return max(opt, pess), min(opt, pess)

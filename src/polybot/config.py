@@ -80,6 +80,28 @@ class QuotingConfig(BaseModel):
     mm_competitor_factor: float = 3.0   # inflate book depth as competitor-liquidity proxy
 
 
+class RewardsConfig(BaseModel):
+    """Liquidity-rewards maker on Polymarket US incentive-program markets.
+
+    See docs/superpowers/specs/2026-06-21-rewards-mm-simulator-design.md (REVISION):
+    reward programs are exposed via /v1/incentives and currently attach only to
+    fast in-play sports/esports markets, so selection is by active-program + live
+    book, not slowness. The volatility metric is computed for reporting only."""
+
+    capital_usd: float = 300.0              # probe scale ($100-500)
+    max_markets: int = 5                    # quote at most N incentivized markets
+    discovery_limit: int = 100              # fetch detail for up to N active programs
+                                            # (pools tie at $2k, so be generous to find open ones)
+    min_snapshots: int = 2                  # snapshots before the volatility metric is meaningful
+    # reward-share uncertainty bounds (spec §6): competing qualifying size is
+    # unobservable, so report a range. opt assumes light competition, pess heavy.
+    opt_competitor_factor: float = 0.25     # × observed in-band depth
+    pess_competitor_factor: float = 1.0     # × max(target_size, observed depth)
+    cycle_seconds: int = 30                 # fast in-play markets -> tighter cadence
+    discovery_interval_minutes: int = 15
+    db_path: str = "data/rewards.sqlite3"
+
+
 class PaperConfig(BaseModel):
     cycle_seconds: int = 60
     discovery_interval_minutes: int = 30
@@ -91,6 +113,7 @@ class Settings(BaseModel):
     forecast: ForecastConfig = ForecastConfig()
     quoting: QuotingConfig = QuotingConfig()
     paper: PaperConfig = PaperConfig()
+    rewards: RewardsConfig = RewardsConfig()
     storage: dict = {"db_path": "data/polybot.sqlite3"}
     # Market-data venue for paper trading. "us" = Polymarket US (the venue we
     # would trade live, via signed gateway calls); "international" = the public

@@ -94,3 +94,16 @@ paper:
   cycle_seconds: 60
   discovery_interval_minutes: 30
   starting_bankroll_usd: 100.0
+
+# Liquidity-rewards maker on Polymarket US incentive-program markets
+# (/v1/incentives; currently fast in-play sports/esports). Simulate-only.
+rewards:
+  capital_usd: 300.0
+  max_markets: 5
+  discovery_limit: 100
+  min_snapshots: 2
+  opt_competitor_factor: 0.25
+  pess_competitor_factor: 1.0
+  cycle_seconds: 30
+  discovery_interval_minutes: 15
+  db_path: "data/rewards.sqlite3"

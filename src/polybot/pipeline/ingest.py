@@ -72,23 +72,41 @@ def run_once(settings: Settings) -> dict:
         except Exception as e:
             log.warning("kalshi fetch failed for %s: %s", city_name, e)
             continue
+        # Per-(city, date) cache: avoid refetching ensemble/obs for every bucket of the same day.
+        _forecast_cache: dict[str, tuple] = {}  # key: target_date -> (members, running, locked)
         for raw in raw_markets:
-            target_date = _target_date_from_ticker(raw["ticker"])
-            u = kalshi.market_to_unified(raw, city_name, target_date)
-            if u is None or not validate_unified(u):
+            try:
+                target_date = _target_date_from_ticker(raw["ticker"])
+                u = kalshi.market_to_unified(raw, city_name, target_date)
+                if u is None or not validate_unified(u):
+                    continue
+                verify_db.upsert_market(conn, _market_cols(u))
+                n_markets += 1
+                mp = kalshi.market_prob_from_quote(u["yes_bid"], u["yes_ask"])
+                if mp is not None:
+                    verify_db.insert_quote(conn, u["market_uid"], now, mp, u["yes_bid"], u["yes_ask"])
+                    n_quotes += 1
+                # Fetch forecast inputs once per (city, date) within this cycle.
+                if target_date not in _forecast_cache:
+                    _forecast_cache[target_date] = (
+                        ensemble.get_ensemble_members(city.lat, city.lon, city.tz, target_date, city.unit),
+                        obs.get_running_max(city.station, city.tz, target_date, city.unit),
+                        obs.is_day_locked(city.tz, target_date, 18),
+                    )
+                members, running, locked = _forecast_cache[target_date]
+                obs_max = None
+                if running is not None:
+                    obs_max = running + fc.locked_bias_f if locked else running - fc.obs_buffer_f
+                model_p = bm.bucket_probability(
+                    members, u["bucket_lo"], u["bucket_hi"], fc.kernel_sigma_f,
+                    obs_max, locked, fc.locked_sigma_f,
+                )
+                lead_h = max((u["close_ts"] - now) / 3600.0, 0.0)
+                verify_db.insert_pred(conn, u["market_uid"], now, model_p, lead_h)
+                n_preds += 1
+            except Exception as e:
+                log.warning("market %s failed: %s", raw.get("ticker"), e)
                 continue
-            verify_db.upsert_market(conn, _market_cols(u))
-            n_markets += 1
-            mp = kalshi.market_prob_from_quote(u["yes_bid"], u["yes_ask"])
-            if mp is not None:
-                verify_db.insert_quote(conn, u["market_uid"], now, mp, u["yes_bid"], u["yes_ask"])
-                n_quotes += 1
-            model_p = model_prob_for_market(city, target_date, u, sigma=fc.kernel_sigma_f,
-                                            obs_buffer=fc.obs_buffer_f, locked_bias=fc.locked_bias_f,
-                                            locked_sigma=fc.locked_sigma_f)
-            lead_h = max((u["close_ts"] - now) / 3600.0, 0.0)
-            verify_db.insert_pred(conn, u["market_uid"], now, model_p, lead_h)
-            n_preds += 1
     if settings.verify.include_polymarket:
         try:
             _ingest_polymarket(conn, settings, now)

@@ -3,6 +3,26 @@ import pytest
 from polybot.analysis import verification as V
 from polybot.storage import verify_db
 
+
+def test_snapshot_window_excludes_far_snapshots(tmp_path):
+    from polybot.analysis import verification as V
+    from polybot.storage import verify_db
+    conn = verify_db.connect(str(tmp_path / "v.sqlite3"))
+    uid = "kalshi:T2"
+    verify_db.upsert_market(conn, {"market_uid": uid, "venue": "kalshi", "external_id": "T2",
+        "city": "NYC", "target_date": "2026-06-22", "bucket_lo": 75.0, "bucket_hi": 76.0,
+        "unit": "F", "question": "q", "close_ts": 1_000_000.0})
+    # one snapshot ~30h before close
+    ts = 1_000_000.0 - 30*3600
+    verify_db.insert_quote(conn, uid, ts, 0.5, 0.48, 0.52)
+    verify_db.insert_pred(conn, uid, ts, 0.8, 30.0)
+    verify_db.settle_market(conn, uid, 1)
+    # with a 12h window: the 30h snapshot matches ONLY the 24h bucket (|30-24|=6h<=12),
+    # not 72/48/6. So evaluation_frame over (72,48,24,6) yields exactly 1 row at lead 24.
+    frame = V.evaluation_frame(conn, lead_buckets=(72, 48, 24, 6))
+    assert len(frame) == 1
+    assert frame[0]["lead_hours"] == 24
+
 def test_brier_and_log_loss():
     assert V.brier(0.7, 1) == pytest.approx(0.09)
     assert V.brier(0.7, 0) == pytest.approx(0.49)

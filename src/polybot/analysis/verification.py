@@ -27,17 +27,21 @@ def calibration_curve(pairs: list[tuple[float, int]], bins: int = 10) -> list[di
         })
     return out
 
-def _nearest_snapshot(conn, table: str, value_col: str, market_uid: str, target_ts: float):
+def _nearest_snapshot(conn, table: str, value_col: str, market_uid: str, target_ts: float,
+                      max_gap_s: float = 12 * 3600):
     rows = conn.execute(
         f"SELECT ts, {value_col} AS v FROM {table} WHERE market_uid = ?", (market_uid,)
     ).fetchall()
     if not rows:
         return None
     best = min(rows, key=lambda r: abs(r["ts"] - target_ts))
+    if abs(best["ts"] - target_ts) > max_gap_s:
+        return None
     return best["v"]
 
 def evaluation_frame(conn: sqlite3.Connection,
-                     lead_buckets: tuple[int, ...] = (72, 48, 24, 6)) -> list[dict]:
+                     lead_buckets: tuple[int, ...] = (72, 48, 24, 6),
+                     max_gap_s: float = 12 * 3600) -> list[dict]:
     frame = []
     markets = conn.execute(
         "SELECT market_uid, city, close_ts, outcome FROM vmarket WHERE settled = 1"
@@ -45,8 +49,10 @@ def evaluation_frame(conn: sqlite3.Connection,
     for m in markets:
         for lead in lead_buckets:
             target_ts = m["close_ts"] - lead * 3600
-            model_p = _nearest_snapshot(conn, "vpred", "model_prob", m["market_uid"], target_ts)
-            market_p = _nearest_snapshot(conn, "vquote", "market_prob", m["market_uid"], target_ts)
+            model_p = _nearest_snapshot(conn, "vpred", "model_prob", m["market_uid"], target_ts,
+                                        max_gap_s=max_gap_s)
+            market_p = _nearest_snapshot(conn, "vquote", "market_prob", m["market_uid"], target_ts,
+                                         max_gap_s=max_gap_s)
             if model_p is None or market_p is None:
                 continue
             frame.append({
@@ -56,8 +62,9 @@ def evaluation_frame(conn: sqlite3.Connection,
     return frame
 
 def score_by_lead_time(conn: sqlite3.Connection,
-                       lead_buckets: tuple[int, ...] = (72, 48, 24, 6)) -> list[dict]:
-    frame = evaluation_frame(conn, lead_buckets)
+                       lead_buckets: tuple[int, ...] = (72, 48, 24, 6),
+                       max_gap_s: float = 12 * 3600) -> list[dict]:
+    frame = evaluation_frame(conn, lead_buckets, max_gap_s=max_gap_s)
     out = []
     for lead in lead_buckets:
         rows = [r for r in frame if r["lead_hours"] == lead]

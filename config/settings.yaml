@@ -102,6 +102,9 @@ rewards:
   max_markets: 5
   discovery_limit: 100
   min_snapshots: 2
+  quote_ticks_behind: 0
+  reward_band: [0.05, 0.95]
+  live_period_seconds: 7200.0
   opt_competitor_factor: 0.25
   pess_competitor_factor: 1.0
   cycle_seconds: 30

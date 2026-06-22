@@ -45,6 +45,9 @@ def test_engine_selects_quotes_and_estimates_reward():
     rep = rewards_report(eng.conn)
     assert rep["reward_opt"] >= rep["reward_pess"] >= 0.0
     assert "net_opt" in rep and "net_pess" in rep
+    # I1: the breakdown reconciles — reward + adverse == net for each bound.
+    assert abs(rep["reward_opt"] + rep["adverse_selection_pnl"] - rep["net_opt"]) < 1e-9
+    assert abs(rep["reward_pess"] + rep["adverse_selection_pnl"] - rep["net_pess"]) < 1e-9
 
 
 def test_engine_skips_market_without_program():

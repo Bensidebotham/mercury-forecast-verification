@@ -91,6 +91,43 @@ def maker_quotes(
     return quotes
 
 
+def reward_quotes(
+    token_id: str,
+    book: dict,
+    capital_usd: float,
+    tick_size: float,
+    ticks_behind: int = 0,
+    reward_band: tuple[float, float] = (0.05, 0.95),
+    inventory_qty: float = 0.0,
+) -> list[MMQuote]:
+    """Two-sided resting quotes for the rewards-MM strategy: rest AT the touch
+    (ticks_behind=0 → max proximity score) or `ticks_behind` ticks back from best
+    (less reward, lower fill risk). Sized from capital. Quotes off the live best
+    prices (already on the venue tick grid) — NOT off a rounded fair value, so the
+    reward score isn't destroyed by a coarse price grid (the bug `_tick` caused).
+
+    Inventory cap = capital_usd: suppress the side that would push |inventory| past it."""
+    bb, ba = book.get("best_bid"), book.get("best_ask")
+    if bb is None or ba is None:
+        return []
+    mid = (bb + ba) / 2
+    if mid <= 0:
+        return []
+    lo, hi = reward_band
+    if not (lo <= mid <= hi):
+        return []
+    size = float(max(1, int(capital_usd / mid)))
+    bid_px = round(bb - ticks_behind * tick_size, 6)
+    ask_px = round(ba + ticks_behind * tick_size, 6)
+    inv_usd = inventory_qty * mid
+    quotes: list[MMQuote] = []
+    if bid_px > 0 and inv_usd < capital_usd:
+        quotes.append(MMQuote(token_id, "BUY", bid_px, size))
+    if ask_px < 1 and inv_usd > -capital_usd:
+        quotes.append(MMQuote(token_id, "SELL", ask_px, size))
+    return quotes
+
+
 def proximity_score(order_price: float, best_price: float, side: str, discount: float) -> float:
     """Reward proximity weight in [0,1]: 1 at the touch, decaying with
     distance via the venue's discount factor. side BUY scores vs best_bid,

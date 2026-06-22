@@ -58,14 +58,17 @@ class RewardsEngine:
         if now - self.last_discovery > self.r.discovery_interval_minutes * 60:
             self.discover()
 
-        stats = {"books": 0, "selected": 0, "quotes": 0, "fills": 0,
+        stats = {"books": 0, "selected": 0, "quotes": 0, "no_quote": 0, "fills": 0,
                  "reward_opt": 0.0, "reward_pess": 0.0, "settled": 0}
 
-        # 1. snapshot every tracked market + process fills from last cycle's quotes
+        # 1. snapshot every tracked market + process fills from last cycle's quotes.
+        #    Cache books so step 3 reuses them instead of re-fetching (signed HTTP).
+        books: dict[str, dict] = {}
         for tid in list(self.markets):
             book = self.client.get_order_book(tid)
             if book is None:
                 continue
+            books[tid] = book
             stats["books"] += 1
             db.insert_snapshot(self.conn, tid, book)
             stats["fills"] += paper.check_maker_fills(self.conn, tid, book, self.s.quoting)
@@ -80,21 +83,26 @@ class RewardsEngine:
         selected = market_select.select_markets(scored, self.r.max_markets)
         stats["selected"] = len(selected)
 
-        # 3. quote the selected markets; estimate reward range; rest the quotes
+        # 3. quote the selected markets at/near the touch; estimate reward range; rest.
         for tid in selected:
             m = self.markets[tid]
-            book = self.client.get_order_book(tid)
+            book = books.get(tid)
             if book is None:
                 continue
             inv = paper.position_qty(self.conn, tid)
-            quotes = mm.maker_quotes(tid, None, book, self.s.quoting, inv, locked=False)
+            quotes = mm.reward_quotes(
+                tid, book, self.r.capital_usd, m["tick_size"],
+                self.r.quote_ticks_behind, tuple(self.r.reward_band), inv,
+            )
             paper.refresh_maker_orders(self.conn, tid, quotes, 0.0)
             if not quotes:
+                stats["no_quote"] += 1  # e.g. mid outside reward_band, or no book sides
                 continue
             stats["quotes"] += len(quotes)
             opt, pess = mm.estimate_reward_range(
                 quotes, book, m["reward"], m["tick_size"], self.r.cycle_seconds,
                 self.r.opt_competitor_factor, self.r.pess_competitor_factor,
+                self._period_seconds(m["reward"].get("period")),
             )
             db.insert_reward_estimate(self.conn, tid, opt, pess)
             stats["reward_opt"] += opt
@@ -103,6 +111,11 @@ class RewardsEngine:
 
         stats["settled"] = self._settle_resolved()
         return stats
+
+    def _period_seconds(self, period: str | None) -> float:
+        """Seconds the reward pool is paid over, by program period. 'live' uses the
+        configured (assumed) in-play window; everything else defaults to a day."""
+        return self.r.live_period_seconds if period == "live" else 86400.0
 
     def _settle_resolved(self) -> int:
         held = [r["token_id"] for r in self.conn.execute(
@@ -160,13 +173,18 @@ def rewards_report(conn) -> dict:
            FROM positions p WHERE p.qty != 0"""
     ).fetchall()
     unreal = sum(r["qty"] * ((r["mark"] or r["avg_cost"]) - r["avg_cost"]) for r in open_pos)
-    adverse = realized + unreal  # inventory PnL net of fees (realized already nets fees)
+    # Inventory PnL = realized (settlement + closed-out trades, already net of fees)
+    # + unrealized mark. Reported as `adverse_selection_pnl` so that, by construction,
+    # reward + adverse_selection_pnl == net for each bound. settlement_pnl and fees_paid
+    # are informational sub-components already contained within adverse_selection_pnl.
+    adverse = realized + unreal
     return {
         "reward_opt": est["o"],
         "reward_pess": est["p"],
-        "adverse_selection_pnl": settle,
-        "unrealized": unreal,
-        "fees_paid": fills["f"],
+        "adverse_selection_pnl": adverse,
+        "settlement_pnl": settle,       # informational (subset of adverse)
+        "unrealized": unreal,           # informational (subset of adverse)
+        "fees_paid": fills["f"],        # informational (already inside adverse via realized)
         "net_opt": est["o"] + adverse,
         "net_pess": est["p"] + adverse,
         "fills": fills["n"],

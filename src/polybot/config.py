@@ -93,6 +93,12 @@ class RewardsConfig(BaseModel):
     discovery_limit: int = 100              # fetch detail for up to N active programs
                                             # (pools tie at $2k, so be generous to find open ones)
     min_snapshots: int = 2                  # snapshots before the volatility metric is meaningful
+    quote_ticks_behind: int = 0             # 0 = join the touch (max reward score, max fill risk)
+    reward_band: tuple[float, float] = (0.05, 0.95)  # skip quoting outside this mid range
+    # The reward pool is paid over a program period. "day_of" ~ a trading day;
+    # "live" is an in-play match window whose true length is unknown — ASSUMPTION,
+    # tune once a real live program's payout window is observed.
+    live_period_seconds: float = 7200.0
     # reward-share uncertainty bounds (spec §6): competing qualifying size is
     # unobservable, so report a range. opt assumes light competition, pess heavy.
     opt_competitor_factor: float = 0.25     # × observed in-band depth

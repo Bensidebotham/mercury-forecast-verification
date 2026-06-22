@@ -1081,78 +1081,133 @@ git commit -m "feat: CLI for ingest/backfill/verify/export"
 
 ---
 
-## Phase 9: Deployed dashboard
+## Phase 9: JSON API surface + polished Next.js dashboard
 
-### Task 9: Streamlit dashboard reading the exported Parquet
+The dashboard is a real web frontend (not Streamlit) so it can be made genuinely
+nice with the `ui-ux-pro-max` skill and deployed on Vercel. The Python pipeline stays
+the backend/star; the frontend reads a static JSON snapshot the pipeline emits, so no
+always-on server is required for the public demo.
+
+### Task 9a: Emit a JSON snapshot for the frontend
 
 **Files:**
-- Create: `webapp/app.py`, `webapp/requirements.txt`
-- Modify: `pyproject.toml` (add `streamlit` to a `viz` optional group, or document it as the webapp's own dep)
+- Modify: `src/polybot/pipeline/export.py` (add `export_json`)
+- Modify: `src/polybot/cli.py` (`export` also writes JSON)
+- Test: `tests/test_export.py` (add a JSON case)
 
-- [ ] **Step 1: Implement the dashboard**
+- [ ] **Step 1: Write the failing test**
 
 ```python
-# webapp/app.py
-"""Mercury — forecast vs. market dashboard. Reads data/evaluations.parquet."""
-import pandas as pd
-import streamlit as st
+# add to tests/test_export.py
+import json
+from polybot.pipeline.export import export_json
+from polybot.storage import verify_db
 
-st.set_page_config(page_title="Mercury — Forecast vs. Market", layout="wide")
-st.title("Mercury — can a weather model beat the market?")
-st.caption("Daily city-temperature markets (Kalshi/Polymarket) vs. a GFS+ECMWF ensemble, "
-           "scored against NWS settlements. Read-only research dashboard — no trading.")
-
-df = pd.read_parquet("data/evaluations.parquet")
-if df.empty:
-    st.info("No settled, paired observations yet — the pipeline is still accruing.")
-    st.stop()
-
-def brier(p, o): return (p - o) ** 2
-df["model_brier"] = brier(df.model_prob, df.outcome)
-df["market_brier"] = brier(df.market_prob, df.outcome)
-
-st.metric("Resolved observations", len(df))
-by_lead = df.groupby("lead_hours")[["model_brier", "market_brier"]].mean().reset_index()
-st.subheader("Brier score by lead time (lower = better)")
-st.bar_chart(by_lead, x="lead_hours", y=["model_brier", "market_brier"])
-
-st.subheader("Calibration — model vs. market")
-col1, col2 = st.columns(2)
-for col, src in ((col1, "model_prob"), (col2, "market_prob")):
-    tmp = df.copy()
-    tmp["bin"] = (tmp[src] * 10).clip(0, 9).astype(int) / 10
-    cal = tmp.groupby("bin").agg(predicted=(src, "mean"), actual=("outcome", "mean")).reset_index()
-    col.caption(src)
-    col.line_chart(cal, x="predicted", y="actual")
-
-st.subheader("By city")
-st.dataframe(df.groupby("city")[["model_brier", "market_brier"]].mean().round(4))
+def test_export_json_shape(tmp_path):
+    conn = verify_db.connect(str(tmp_path / "v.sqlite3"))
+    uid = "kalshi:T1"
+    verify_db.upsert_market(conn, {"market_uid": uid, "venue": "kalshi", "external_id": "T1",
+        "city": "NYC", "target_date": "2026-06-22", "bucket_lo": 75.0, "bucket_hi": 76.0,
+        "unit": "F", "question": "q", "close_ts": 1000.0})
+    verify_db.insert_quote(conn, uid, 1000.0 - 48*3600, 0.5, 0.48, 0.52)
+    verify_db.insert_pred(conn, uid, 1000.0 - 48*3600, 0.8, 48.0)
+    verify_db.settle_market(conn, uid, 1)
+    out = tmp_path / "evaluations.json"
+    export_json(conn, str(out), lead_buckets=(48,))
+    doc = json.loads(out.read_text())
+    assert doc["n_resolved"] == 1
+    assert {"lead_hours", "model_brier", "market_brier", "n"} <= set(doc["by_lead"][0])
+    assert {"city", "model_prob", "market_prob", "outcome", "lead_hours"} <= set(doc["rows"][0])
+    assert "generated_ts" in doc
 ```
 
-- [ ] **Step 2: Pin webapp deps**
+- [ ] **Step 2: Run test to verify it fails**
 
-`webapp/requirements.txt`:
+Run: `uv run pytest tests/test_export.py::test_export_json_shape -v`
+Expected: FAIL — `export_json` not defined
+
+- [ ] **Step 3: Implement `export_json`**
+
+```python
+# add to src/polybot/pipeline/export.py
+import json
+import time
+
+from polybot.analysis.verification import evaluation_frame, score_by_lead_time
+
+def export_json(conn, out_path: str, lead_buckets=(72, 48, 24, 6)) -> int:
+    rows = evaluation_frame(conn, lead_buckets)
+    doc = {
+        "generated_ts": time.time(),
+        "n_resolved": len(rows),
+        "by_lead": score_by_lead_time(conn, lead_buckets),
+        "rows": rows,
+    }
+    with open(out_path, "w") as f:
+        json.dump(doc, f)
+    return len(rows)
 ```
-streamlit
-pandas
-pyarrow
-```
 
-- [ ] **Step 3: Run locally**
+Wire into the `export` CLI command (in `src/polybot/cli.py`): after the Parquet write, also call
+`export_json(conn, _abs(out.replace(".parquet", ".json")), s.verify.lead_buckets)`.
 
-Run: `uv run polybot export && cd webapp && streamlit run app.py`
-Expected: dashboard opens; shows the accruing data or the "still accruing" note.
+- [ ] **Step 4: Run test to verify it passes**
 
-- [ ] **Step 4: Deploy to a public URL**
-
-Push to GitHub, then deploy on **Streamlit Community Cloud** (free): point it at `webapp/app.py`. The app reads `data/evaluations.parquet`, which the scheduled Action (Phase 10) keeps current in the repo. Capture the public URL — it goes on the resume.
+Run: `uv run pytest tests/test_export.py -v`
+Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add webapp/app.py webapp/requirements.txt
-git commit -m "feat: deployable Streamlit forecast-vs-market dashboard"
+git add src/polybot/pipeline/export.py src/polybot/cli.py tests/test_export.py
+git commit -m "feat: JSON snapshot export for the web frontend"
 ```
+
+### Task 9b: Scaffold + build the Next.js dashboard (UI/UX skill)
+
+**Files:**
+- Create: `frontend/` (Next.js App Router + Tailwind + shadcn/ui)
+- Create: `frontend/public/evaluations.json` (committed snapshot the app reads; refreshed by the Action)
+
+- [ ] **Step 1: Scaffold**
+
+```bash
+npx create-next-app@latest frontend --ts --tailwind --eslint --app --src-dir --use-npm --no-import-alias
+```
+
+- [ ] **Step 2: Seed the data file**
+
+```bash
+uv run polybot export --out data/evaluations.parquet
+cp data/evaluations.json frontend/public/evaluations.json
+```
+
+- [ ] **Step 3: Build the UI with the `ui-ux-pro-max` skill**
+
+Invoke the `ui-ux-pro-max` skill to design and implement the dashboard. Requirements for the design brief:
+- Single-page "Mercury — Can a weather model beat the market?" dashboard, dark, data-dense but elegant (think a quant research terminal / observability dashboard).
+- Hero strip: headline verdict ("model beats market at T-72h" or neutral if not), big stat tiles — resolved observations, cities tracked, model vs. market Brier.
+- **Brier-by-lead-time** grouped bar chart (model vs. market) — the centerpiece.
+- **Calibration** chart — model and market reliability curves vs. the diagonal.
+- **By-city** sortable table of model vs. market Brier.
+- A clear "read-only research project — no trading" footer note.
+- Reads `/evaluations.json` (static). Use Recharts or visx for charts, shadcn/ui for shell/table.
+
+- [ ] **Step 4: Run + screenshot**
+
+Run: `cd frontend && npm run dev` and verify it renders the seeded data (or an empty-state if `n_resolved` is 0).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add frontend
+git commit -m "feat: polished Next.js forecast-vs-market dashboard"
+```
+
+### Task 9c: Deploy to Vercel
+
+- [ ] **Step 1:** Deploy `frontend/` to Vercel (root directory `frontend`). Capture the public URL — it goes on the resume.
+- [ ] **Step 2:** Confirm the live URL renders the committed `evaluations.json`.
 
 ---
 
@@ -1184,11 +1239,12 @@ jobs:
       - run: uv run polybot backfill-kalshi
       - run: uv run polybot ingest-once
       - run: uv run polybot export --out data/evaluations.parquet
+      - run: cp data/evaluations.json frontend/public/evaluations.json
       - name: Commit refreshed data
         run: |
           git config user.name  "mercury-bot"
           git config user.email "mercury-bot@users.noreply.github.com"
-          git add data/evaluations.parquet data/verify.sqlite3 || true
+          git add data/evaluations.parquet data/evaluations.json frontend/public/evaluations.json || true
           git commit -m "data: scheduled ingest $(date -u +%FT%TZ)" || echo "no changes"
           git push
 ```

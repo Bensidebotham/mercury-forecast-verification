@@ -12,7 +12,7 @@ time. Results are published to a live dashboard.
 > **No trading is performed anywhere in this repo.** The deliverable is the measurement and the honest
 > result, not a strategy or a P&L. (Earlier trading experiments are parked in `legacy/`.)
 
-**Live dashboard:** _(deploy `frontend/` to Vercel and paste the URL here)_
+**Live dashboard:** https://mercury-forecast-verification.vercel.app
 
 ---
 

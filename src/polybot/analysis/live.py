@@ -13,7 +13,7 @@ def _latest(conn: sqlite3.Connection, table: str, col: str, market_uid: str):
     return (row["v"], row["ts"]) if row else (None, None)
 
 
-def current_disagreements(conn: sqlite3.Connection, limit: int = 25, now: float | None = None) -> list[dict]:
+def current_disagreements(conn: sqlite3.Connection, limit: int = 25, now: float | None = None, min_lead_hours: float = 1.0) -> list[dict]:
     now = now if now is not None else time.time()
     out = []
     markets = conn.execute(
@@ -25,14 +25,16 @@ def current_disagreements(conn: sqlite3.Connection, limit: int = 25, now: float 
         model_p, _ = _latest(conn, "vpred", "model_prob", m["market_uid"])
         if market_p is None or model_p is None:
             continue
-        lead_h = max((m["close_ts"] - now) / 3600.0, 0.0) if m["close_ts"] is not None else None
+        lead_h = (m["close_ts"] - now) / 3600.0 if m["close_ts"] is not None else None
+        if lead_h is None or lead_h < min_lead_hours:
+            continue
         out.append({
             "market_uid": m["market_uid"], "venue": m["venue"], "city": m["city"],
             "target_date": m["target_date"], "question": m["question"],
             "bucket_lo": m["bucket_lo"], "bucket_hi": m["bucket_hi"],
             "model_prob": round(model_p, 4), "market_prob": round(market_p, 4),
             "edge": round(model_p - market_p, 4),
-            "lead_hours": round(lead_h, 1) if lead_h is not None else None,
+            "lead_hours": round(lead_h, 1),
         })
     out.sort(key=lambda r: abs(r["edge"]), reverse=True)
     return out[:limit]

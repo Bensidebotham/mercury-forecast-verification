@@ -31,6 +31,28 @@ def test_current_disagreements_skips_markets_missing_a_side(tmp_path):
     verify_db.insert_pred(conn, "kalshi:D", time.time(), 0.7, 24.0)  # model only, no quote
     assert live.current_disagreements(conn) == []
 
+def test_current_disagreements_excludes_past_close_markets(tmp_path):
+    import time
+    from polybot.analysis import live
+    from polybot.storage import verify_db
+    conn = verify_db.connect(str(tmp_path / "v.sqlite3"))
+    past = time.time() - 3600        # closed an hour ago
+    future = time.time() + 24*3600
+    # past-close market with a huge edge -> must be EXCLUDED
+    verify_db.upsert_market(conn, {"market_uid": "kalshi:PAST", "venue": "kalshi", "external_id": "PAST",
+        "city": "NYC", "target_date": "2026-06-22", "bucket_lo": 75.0, "bucket_hi": 76.0,
+        "unit": "F", "question": "q", "close_ts": past})
+    verify_db.insert_quote(conn, "kalshi:PAST", time.time(), 0.99, 0.98, 1.0)
+    verify_db.insert_pred(conn, "kalshi:PAST", time.time(), 0.0, 0.0)
+    # genuinely-open market with a modest edge -> must be INCLUDED
+    verify_db.upsert_market(conn, {"market_uid": "kalshi:OPEN", "venue": "kalshi", "external_id": "OPEN",
+        "city": "NYC", "target_date": "2026-06-24", "bucket_lo": 75.0, "bucket_hi": 76.0,
+        "unit": "F", "question": "q", "close_ts": future})
+    verify_db.insert_quote(conn, "kalshi:OPEN", time.time(), 0.50, 0.48, 0.52)
+    verify_db.insert_pred(conn, "kalshi:OPEN", time.time(), 0.65, 24.0)
+    rows = live.current_disagreements(conn)
+    assert [r["market_uid"] for r in rows] == ["kalshi:OPEN"]
+
 def test_tracking_summary_counts(tmp_path):
     conn = verify_db.connect(str(tmp_path / "v.sqlite3"))
     future = time.time() + 24*3600

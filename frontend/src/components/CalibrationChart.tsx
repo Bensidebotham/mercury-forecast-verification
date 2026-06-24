@@ -90,6 +90,7 @@ export default function CalibrationChart({ modelCurve, marketCurve }: Calibratio
               strokeDasharray="4 4"
               dot={false}
               strokeWidth={1}
+              isAnimationActive={false}
             />
             <Line
               type="monotone"
@@ -99,6 +100,7 @@ export default function CalibrationChart({ modelCurve, marketCurve }: Calibratio
               dot={{ fill: '#3B82F6', r: 3 }}
               strokeWidth={2}
               connectNulls={false}
+              isAnimationActive={false}
             />
             <Line
               type="monotone"
@@ -108,6 +110,7 @@ export default function CalibrationChart({ modelCurve, marketCurve }: Calibratio
               dot={{ fill: '#D97706', r: 3 }}
               strokeWidth={2}
               connectNulls={false}
+              isAnimationActive={false}
             />
           </LineChart>
         </ResponsiveContainer>

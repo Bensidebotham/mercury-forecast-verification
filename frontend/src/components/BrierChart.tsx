@@ -59,8 +59,8 @@ export default function BrierChart({ data }: BrierChartProps) {
             <Legend
               wrapperStyle={{ color: 'var(--color-muted)', fontSize: 12 }}
             />
-            <Bar dataKey="model_brier" name="Model" fill="#3B82F6" radius={[4, 4, 0, 0]} />
-            <Bar dataKey="market_brier" name="Market" fill="#D97706" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="model_brier" name="Model" fill="#3B82F6" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+            <Bar dataKey="market_brier" name="Market" fill="#D97706" radius={[4, 4, 0, 0]} isAnimationActive={false} />
           </BarChart>
         </ResponsiveContainer>
       </div>

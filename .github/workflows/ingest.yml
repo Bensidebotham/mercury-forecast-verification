@@ -8,6 +8,10 @@ permissions:
 jobs:
   ingest:
     runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: team_GALWjNNH0UyrNpA5A0WrqBxd
+      VERCEL_PROJECT_ID: prj_izrbaWI6DQiHFUIhUVToJlXTTA4e
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -25,3 +29,13 @@ jobs:
           git add frontend/public/evaluations.json || true
           git commit -m "data: scheduled ingest $(date -u +%FT%TZ)" || echo "no changes"
           git push
+      # Redeploy the live dashboard with the fresh data. Skipped until a
+      # VERCEL_TOKEN repo secret exists (create one: `vercel tokens create`,
+      # then `gh secret set VERCEL_TOKEN`). Until then, data still updates in the repo.
+      - name: Redeploy dashboard
+        if: ${{ env.VERCEL_TOKEN != '' }}
+        working-directory: frontend
+        run: |
+          npm i -g vercel@latest
+          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          vercel deploy --prod --yes --token="$VERCEL_TOKEN"

@@ -14,8 +14,21 @@ const firaSans = Fira_Sans({
 })
 
 export const metadata: Metadata = {
-  title: 'Mercury — Weather Model vs Market',
-  description: 'Forecast accuracy dashboard',
+  title: 'Mercury — Forecast vs. Market',
+  description:
+    'Live accuracy dashboard: does a weather model beat the prediction market on temperature forecasts?',
+  openGraph: {
+    title: 'Mercury — Forecast vs. Market',
+    description:
+      'Live accuracy dashboard: does a weather model beat the prediction market on temperature forecasts?',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary',
+    title: 'Mercury — Forecast vs. Market',
+    description:
+      'Live accuracy dashboard: does a weather model beat the prediction market on temperature forecasts?',
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

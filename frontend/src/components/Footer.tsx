@@ -4,7 +4,10 @@ export default function Footer() {
       <p>Read-only research dashboard — not financial advice.</p>
       <p className="mt-1">
         Data refreshes on a schedule ·{' '}
-        <a href="https://github.com" className="underline hover:text-[var(--color-text)]">
+        <a
+          href="https://github.com/Bensidebotham/mercury-forecast-verification"
+          className="underline hover:text-[var(--color-text)] transition-colors duration-150 motion-reduce:transition-none"
+        >
           GitHub
         </a>
       </p>

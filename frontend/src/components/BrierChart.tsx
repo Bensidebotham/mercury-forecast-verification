@@ -11,7 +11,7 @@ import {
 } from 'recharts'
 
 interface BrierChartProps {
-  data: Array<{ lead_hours: number; model_brier: number; market_brier: number }>
+  data: Array<{ lead_hours: number; model_brier: number; market_brier: number; n?: number }>
 }
 
 export default function BrierChart({ data }: BrierChartProps) {
@@ -46,7 +46,15 @@ export default function BrierChart({ data }: BrierChartProps) {
                 borderRadius: 8,
                 color: 'var(--color-text)',
               }}
-              labelFormatter={(v) => `${v}h lead`}
+              labelFormatter={(v) => {
+                const row = data.find((d) => d.lead_hours === Number(v))
+                const nLabel = row?.n != null ? ` (n=${row.n})` : ''
+                return `${v}h lead${nLabel}`
+              }}
+              formatter={(value, name) => [
+                typeof value === 'number' ? value.toFixed(4) : String(value),
+                String(name),
+              ]}
             />
             <Legend
               wrapperStyle={{ color: 'var(--color-muted)', fontSize: 12 }}
@@ -57,7 +65,7 @@ export default function BrierChart({ data }: BrierChartProps) {
         </ResponsiveContainer>
       </div>
       <p className="text-xs text-[var(--color-muted)] mt-3 text-center">
-        Lower Brier score = better calibration
+        Lower Brier score = better calibration · hover bars for sample size
       </p>
     </div>
   )

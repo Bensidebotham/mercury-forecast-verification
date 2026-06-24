@@ -34,7 +34,7 @@ export default function BrierChart({ data }: BrierChartProps) {
               tickLine={false}
             />
             <YAxis
-              domain={[0, 0.35]}
+              domain={[0, (dataMax: number) => Math.max(0.05, +(dataMax * 1.25).toFixed(3))]}
               tick={{ fill: 'var(--color-muted)', fontSize: 12 }}
               axisLine={{ stroke: 'var(--color-border)' }}
               tickLine={false}

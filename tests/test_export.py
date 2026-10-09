@@ -1,6 +1,6 @@
 import pyarrow.parquet as pq
-from polybot.pipeline.export import export_evaluation
-from polybot.storage import verify_db
+from weather_vs_market.pipeline.export import export_evaluation
+from weather_vs_market.storage import verify_db
 
 def test_export_writes_parquet(tmp_path):
     conn = verify_db.connect(str(tmp_path / "v.sqlite3"))
@@ -17,12 +17,12 @@ def test_export_writes_parquet(tmp_path):
     assert pq.read_table(str(out)).num_rows == 1
 
 import json
-from polybot.pipeline.export import export_json
+from weather_vs_market.pipeline.export import export_json
 
 def test_export_json_includes_live_sections(tmp_path):
     import json, time
-    from polybot.pipeline.export import export_json
-    from polybot.storage import verify_db
+    from weather_vs_market.pipeline.export import export_json
+    from weather_vs_market.storage import verify_db
     conn = verify_db.connect(str(tmp_path / "v.sqlite3"))
     future = time.time() + 24*3600
     verify_db.upsert_market(conn, {"market_uid": "kalshi:A", "venue": "kalshi", "external_id": "A",
@@ -38,7 +38,7 @@ def test_export_json_includes_live_sections(tmp_path):
     assert doc["live_disagreements"][0]["edge"] == 0.3
 
 def test_export_json_shape(tmp_path):
-    from polybot.storage import verify_db
+    from weather_vs_market.storage import verify_db
     conn = verify_db.connect(str(tmp_path / "v.sqlite3"))
     uid = "kalshi:T1"
     verify_db.upsert_market(conn, {"market_uid": uid, "venue": "kalshi", "external_id": "T1",

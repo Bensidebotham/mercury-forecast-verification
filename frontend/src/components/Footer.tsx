@@ -5,7 +5,7 @@ export default function Footer() {
       <p className="mt-1">
         Data refreshes on a schedule ·{' '}
         <a
-          href="https://github.com/Bensidebotham/mercury-forecast-verification"
+          href="https://github.com/Bensidebotham/weather-vs-market"
           className="underline hover:text-[var(--color-text)] transition-colors duration-150 motion-reduce:transition-none"
         >
           GitHub

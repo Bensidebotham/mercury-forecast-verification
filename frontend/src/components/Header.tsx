@@ -18,7 +18,7 @@ export default function Header({ verdict, verdictTone, isSample }: HeaderProps) 
     <header className="mb-6">
       <div className="flex flex-col sm:flex-row sm:items-end gap-4 mb-2">
         <h1 className="font-mono text-4xl font-bold tracking-tight text-[var(--color-text)]">
-          MERCURY
+          weather-vs-market
         </h1>
         <div className="flex flex-wrap items-center gap-2 pb-1">
           <span

@@ -1,12 +1,12 @@
 import math
 import pytest
-from polybot.analysis import verification as V
-from polybot.storage import verify_db
+from weather_vs_market.analysis import verification as V
+from weather_vs_market.storage import verify_db
 
 
 def test_snapshot_window_excludes_far_snapshots(tmp_path):
-    from polybot.analysis import verification as V
-    from polybot.storage import verify_db
+    from weather_vs_market.analysis import verification as V
+    from weather_vs_market.storage import verify_db
     conn = verify_db.connect(str(tmp_path / "v.sqlite3"))
     uid = "kalshi:T2"
     verify_db.upsert_market(conn, {"market_uid": uid, "venue": "kalshi", "external_id": "T2",

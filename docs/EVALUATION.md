@@ -1,6 +1,6 @@
 # Evaluation — Model vs. Market
 
-> Honest status. Updated as the pipeline accrues data. Run `uv run polybot verify-report` for the
+> Honest status. Updated as the pipeline accrues data. Run `uv run wvm report` for the
 > current numbers and paste the table here.
 
 ## Current state (initial run, 2026-06-22)
@@ -19,7 +19,7 @@ running**, and grows daily thereafter.
 
 ## Model vs. market (Brier / log-loss by lead time)
 
-_Populate from `uv run polybot verify-report` once resolved+paired markets exist:_
+_Populate from `uv run wvm report` once resolved+paired markets exist:_
 
 | lead (h before close) | n | model Brier | market Brier | model logloss | market logloss |
 |---|---|---|---|---|---|

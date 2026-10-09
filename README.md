@@ -1,8 +1,8 @@
-# Mercury — Forecast vs. Market Verification Pipeline
+# weather-vs-market
 
 **Can a calibrated weather model out-predict the betting market on daily city temperatures?**
 
-Mercury is a read-only Python data pipeline that ingests daily high-temperature **markets** from
+weather-vs-market is a read-only Python data pipeline that ingests daily high-temperature **markets** from
 Kalshi and Polymarket plus multi-model weather **ensembles** (GFS + ECMWF via Open-Meteo, NWS, and
 live METAR station observations), unifies them into one normalized store, and benchmarks the
 **model-implied** probability against the **market-implied** probability for every market — scored
@@ -10,7 +10,7 @@ against the official **NWS settlement** with Brier score, log-loss, and calibrat
 time. Results are published to a live dashboard.
 
 > **No trading is performed anywhere in this repo.** The deliverable is the measurement and the honest
-> result, not a strategy or a P&L. (Earlier trading experiments are parked in `legacy/`.)
+> result, not a strategy or a P&L.
 
 **Live dashboard:** https://mercury-forecast-verification.vercel.app
 
@@ -38,10 +38,10 @@ immediately; live model-vs-market lead-time comparisons accrue forward as snapsh
 
 ```bash
 uv sync
-uv run polybot backfill-kalshi   # seed settled markets (no auth needed)
-uv run polybot ingest-once       # one read-only ingestion cycle (model + market snapshots)
-uv run polybot verify-report     # model vs. market Brier/log-loss by lead time
-uv run polybot export            # write data/evaluations.{parquet,json}
+uv run wvm backfill   # seed settled Kalshi markets (no auth needed)
+uv run wvm ingest     # one read-only ingestion cycle (model + market snapshots)
+uv run wvm report     # model vs. market Brier/log-loss by lead time
+uv run wvm export     # write data/evaluations.{parquet,json}
 
 # dashboard
 cp data/evaluations.json frontend/public/evaluations.json
@@ -54,24 +54,25 @@ Scheduled ingestion runs via GitHub Actions (`.github/workflows/ingest.yml`, eve
 ## Layout
 
 ```
-src/polybot/
+src/weather_vs_market/
   clients/kalshi.py        keyless Kalshi temperature-market client
-  clients/gamma.py         Polymarket market discovery (existing)
-  forecast/                Open-Meteo ensemble, NWS, METAR observations (existing)
-  model/buckets.py         bucket probability from ensemble members (existing)
-  model/kalshi_buckets.py  parse Kalshi strike labels
+  clients/gamma.py         Polymarket market discovery
+  forecast/                Open-Meteo ensemble, NWS, METAR observations
+  model/buckets.py         bucket probability from ensemble members
+  model/kalshi_buckets.py  parse Kalshi strike labels (fallback when strikes are absent)
   storage/verify_db.py     unified cross-venue SQLite store
   pipeline/ingest.py       one read-only ingestion cycle
   pipeline/backfill.py     Kalshi settlement-history backfill
   pipeline/export.py       Parquet + JSON export
   analysis/verification.py Brier / log-loss / calibration, model vs. market by lead time
+  analysis/live.py         live model-vs-market disagreements for the dashboard
 frontend/                  Next.js + Recharts dashboard
-legacy/                    parked trading experiments (not part of the pipeline)
 ```
 
 ## Tests
 
-`uv run pytest tests/ -q` — 33 passing (pure scoring/parsing/storage logic + ingestion binding).
+`uv run pytest -q` — 39 passing (pure scoring/parsing/storage logic + ingestion binding). CI runs the
+Python tests plus the dashboard's lint and build on every push.
 
 ## Honest evaluation
 

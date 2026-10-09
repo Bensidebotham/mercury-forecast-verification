@@ -1,7 +1,7 @@
 [project]
-name = "polybot"
-version = "0.1.0"
-description = "Mercury — weather forecast vs. prediction-market verification pipeline"
+name = "weather-vs-market"
+version = "0.2.0"
+description = "Score weather-model probabilities against Kalshi and Polymarket temperature markets"
 requires-python = ">=3.12"
 dependencies = [
     "httpx",
@@ -9,14 +9,11 @@ dependencies = [
     "pyyaml",
     "typer",
     "rich",
-    "python-dotenv",
-    "cryptography",  # Ed25519 request signing for the Polymarket US API
-    # "py-clob-client",  # enable in phase 1 — verify v2 vs newer py-sdk first
     "pyarrow",
 ]
 
 [project.scripts]
-polybot = "polybot.cli:app"
+wvm = "weather_vs_market.cli:app"
 
 [dependency-groups]
 dev = ["pytest"]
@@ -26,4 +23,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/polybot"]
+packages = ["src/weather_vs_market"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

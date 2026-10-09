@@ -16,6 +16,11 @@ interface CityTableProps {
 type SortKey = keyof CityRow
 type SortDir = 'asc' | 'desc'
 
+function SortIcon({ col, sortKey, sortDir }: { col: SortKey; sortKey: SortKey; sortDir: SortDir }) {
+  if (col !== sortKey) return <span className="ml-1 opacity-30">↕</span>
+  return <span className="ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>
+}
+
 export default function CityTable({ rows }: CityTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>('modelBrier')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
@@ -65,11 +70,6 @@ export default function CityTable({ rows }: CityTableProps) {
     )
   }
 
-  function SortIcon({ col }: { col: SortKey }) {
-    if (col !== sortKey) return <span className="ml-1 opacity-30">↕</span>
-    return <span className="ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>
-  }
-
   const thClass =
     'px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[var(--color-muted)] cursor-pointer select-none hover:text-[var(--color-text)] transition-colors'
 
@@ -87,35 +87,35 @@ export default function CityTable({ rows }: CityTableProps) {
                 onClick={() => handleSort('city')}
                 aria-sort={sortKey === 'city' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
               >
-                City <SortIcon col="city" />
+                City <SortIcon col="city" sortKey={sortKey} sortDir={sortDir} />
               </th>
               <th
                 className={thClass}
                 onClick={() => handleSort('n')}
                 aria-sort={sortKey === 'n' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
               >
-                N <SortIcon col="n" />
+                N <SortIcon col="n" sortKey={sortKey} sortDir={sortDir} />
               </th>
               <th
                 className={thClass}
                 onClick={() => handleSort('modelBrier')}
                 aria-sort={sortKey === 'modelBrier' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
               >
-                Model Brier <SortIcon col="modelBrier" />
+                Model Brier <SortIcon col="modelBrier" sortKey={sortKey} sortDir={sortDir} />
               </th>
               <th
                 className={thClass}
                 onClick={() => handleSort('marketBrier')}
                 aria-sort={sortKey === 'marketBrier' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
               >
-                Market Brier <SortIcon col="marketBrier" />
+                Market Brier <SortIcon col="marketBrier" sortKey={sortKey} sortDir={sortDir} />
               </th>
               <th
                 className={thClass}
                 onClick={() => handleSort('winner')}
                 aria-sort={sortKey === 'winner' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
               >
-                Winner <SortIcon col="winner" />
+                Winner <SortIcon col="winner" sortKey={sortKey} sortDir={sortDir} />
               </th>
             </tr>
           </thead>

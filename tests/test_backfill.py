@@ -1,4 +1,4 @@
-from polybot.pipeline.backfill import outcome_from_result, settled_rows_to_unified
+from weather_vs_market.pipeline.backfill import outcome_from_result, settled_rows_to_unified
 
 def test_outcome_from_result():
     assert outcome_from_result("yes") == 1

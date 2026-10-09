@@ -1,4 +1,4 @@
-from polybot.storage import verify_db
+from weather_vs_market.storage import verify_db
 
 def test_upsert_market_and_quote_and_pred(tmp_path):
     conn = verify_db.connect(str(tmp_path / "v.sqlite3"))

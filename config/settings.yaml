@@ -1,11 +1,9 @@
-# --- Cities: the 5 Polymarket US temperature cities (settlement stations pinned
-# from docs.polymarket.us Weather FAQs). aliases match international Gamma event
-# titles so paper trading can run on public intl data until the US API key lands.
+# Cities scored against Kalshi and Polymarket daily-high temperature markets.
+# Stations are the official settlement stations (NWS CLI daily maximum).
 forecast:
   cities:
-    # Polymarket US settles NYC on KNYC (Central Park) + NWS CLI. We are now
-    # on the US venue (data_source: us), so observations read KNYC — using the
-    # LaGuardia airport station here biased obs up to 4.5F off settlement.
+    # NYC settles on KNYC (Central Park) via the NWS CLI. Using the LaGuardia
+    # airport station instead biased observations up to 4.5F off settlement.
     - name: "New York"
       station: "KNYC"
       lat: 40.779
@@ -41,72 +39,16 @@ forecast:
       tz: "America/Los_Angeles"
       unit: "F"
       aliases: ["Los Angeles", "LA"]
-  sources: ["nws", "openmeteo_ensemble"]
-  refresh_interval_minutes: 30
   kernel_sigma_f: 1.5        # smoothing kernel width per ensemble member, °F
   lock_hour_local: 18        # hard fallback: after this local hour, day is locked
-  # Plateau lock: the daily high is usually in by mid-afternoon. If the
-  # observed max hasn't risen in `plateau_hours` and it's past
-  # `earliest_lock_hour` local, treat the high as locked — this catches the
-  # window where the winning bucket is decided but the thin book is stale.
-  # Tightened 2026-06-21 (post-mortem): the old 14:00 / 2h window locked the
-  # wrong bucket 1-4h before the true peak. 15:00 + 3h waits out late climbs.
-  earliest_lock_hour: 15
-  plateau_hours: 3.0
   # Jun-11 settlements showed airport-station obs match resolution within
   # rounding — small buffer for missed peaks between hourly obs, no bias.
   obs_buffer_f: 1.0
   locked_bias_f: 0.0
   locked_sigma_f: 0.75
 
-# --- Phase 1: order book logging ---
-ingest:
-  snapshot_interval_seconds: 60
-  market_filter:
-    tags: ["weather"]
-
-# --- Paper trading (live trading does not exist in this codebase) ---
-quoting:
-  margin: 0.02               # maker quotes at model price +/- margin
-  max_position_usd: 10       # per-bucket cap (sized for the $100 bankroll plan)
-  max_event_usd: 25          # total exposure cap per city/date event
-  max_total_usd: 80          # global cap: total open cost basis (80% of bankroll)
-  max_open_orders_per_market: 2
-  min_edge_to_quote: 0.03    # taker: required model-vs-price edge net of fees
-  max_contracts_per_fill: 500  # post-mortem: cap size so cheap asks can't 10k a longshot
-  min_taker_price: 0.02      # below this, only buy if near-certain (longshot screen)
-  longshot_prob_floor: 0.5   # required model_prob to buy a sub-min_taker_price ask
-  maker_fill_haircut: 0.5    # assume we capture only 50% of crossing flow
-  taker_theta: 0.05          # Polymarket US fee curve: fee = theta*C*p*(1-p)
-  maker_theta: -0.0125       # negative = rebate
-  use_calibration: true      # route model probs through learned win-rate curve
-  lock_in_only: true         # ONLY trade observation-locked buckets (speed edge)
-  paper: true                # hard default; live requires explicit override
-
-# Market-data venue for paper trading: "us" (Polymarket US, signed) or
-# "international" (public gamma/clob). See clients/provider.py.
-data_source: us
-
-storage:
-  db_path: "data/polybot.sqlite3"
-
-paper:
-  cycle_seconds: 60
-  discovery_interval_minutes: 30
-  starting_bankroll_usd: 100.0
-
-# Liquidity-rewards maker on Polymarket US incentive-program markets
-# (/v1/incentives; currently fast in-play sports/esports). Simulate-only.
-rewards:
-  capital_usd: 300.0
-  max_markets: 5
-  discovery_limit: 100
-  min_snapshots: 2
-  quote_ticks_behind: 0
-  reward_band: [0.05, 0.95]
-  live_period_seconds: 7200.0
-  opt_competitor_factor: 0.25
-  pess_competitor_factor: 1.0
-  cycle_seconds: 30
-  discovery_interval_minutes: 15
-  db_path: "data/rewards.sqlite3"
+verify:
+  db_path: "data/verify.sqlite3"
+  lead_buckets: [72, 48, 24, 6]   # hours before market close to score at
+  kalshi_cities: ["New York", "Los Angeles", "Chicago", "Miami"]
+  include_polymarket: true

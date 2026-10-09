@@ -1,6 +1,6 @@
 import time
-from polybot.analysis import live
-from polybot.storage import verify_db
+from weather_vs_market.analysis import live
+from weather_vs_market.storage import verify_db
 
 def _seed(conn, uid, settled, model_p, market_p, close_ts):
     verify_db.upsert_market(conn, {"market_uid": uid, "venue": "kalshi", "external_id": uid.split(":")[1],
@@ -33,8 +33,8 @@ def test_current_disagreements_skips_markets_missing_a_side(tmp_path):
 
 def test_current_disagreements_excludes_past_close_markets(tmp_path):
     import time
-    from polybot.analysis import live
-    from polybot.storage import verify_db
+    from weather_vs_market.analysis import live
+    from weather_vs_market.storage import verify_db
     conn = verify_db.connect(str(tmp_path / "v.sqlite3"))
     past = time.time() - 3600        # closed an hour ago
     future = time.time() + 24*3600

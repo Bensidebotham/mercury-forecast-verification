@@ -1,6 +1,6 @@
 import math
 
-from polybot.model.buckets import bucket_probability, ladder_probabilities, parse_bucket
+from weather_vs_market.model.buckets import bucket_probability, ladder_probabilities, parse_bucket
 
 
 def test_parse_between():

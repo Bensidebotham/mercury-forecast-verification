@@ -1,6 +1,6 @@
 import type { Verdict } from '@/lib/format'
 
-export const REPO_URL = 'https://github.com/Bensidebotham/mercury-forecast-verification'
+export const REPO_URL = 'https://github.com/Bensidebotham/weather-vs-market'
 
 const TONE: Record<Verdict['tone'], string> = {
   model: 'border-[var(--color-model)] text-[var(--color-text)]',

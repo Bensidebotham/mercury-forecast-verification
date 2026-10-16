@@ -1,6 +1,6 @@
 # weather-vs-market
 
-[![test](https://github.com/Bensidebotham/mercury-forecast-verification/actions/workflows/test.yml/badge.svg)](https://github.com/Bensidebotham/mercury-forecast-verification/actions/workflows/test.yml)
+[![test](https://github.com/Bensidebotham/weather-vs-market/actions/workflows/test.yml/badge.svg)](https://github.com/Bensidebotham/weather-vs-market/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **Can a bias-corrected weather model out-predict Kalshi and Polymarket on tomorrow's high temperature?**
@@ -22,7 +22,7 @@ dashboard. No trading happens anywhere in this repo; the deliverable is the meas
 | Polymarket | D 08:00 | 1,306 | 0.743 | 0.563 | +0.180 [+0.162, +0.199] |
 <!-- results:end -->
 
-**Live dashboard:** https://mercury-forecast-verification.vercel.app
+**Live dashboard:** https://weather-vs-market.vercel.app
 
 ![Dashboard](docs/img/dashboard.png)
 
@@ -102,7 +102,7 @@ uv run wvm backtest report                         # -> README table + docs/RESU
 ```
 
 Set `DATABASE_URL` to use Postgres instead of SQLite. A weekly Parquet dump of every table is attached to
-the [`data-latest` release](https://github.com/Bensidebotham/mercury-forecast-verification/releases/tag/data-latest)
+the [`data-latest` release](https://github.com/Bensidebotham/weather-vs-market/releases/tag/data-latest)
 for analysis without running anything.
 
 ## Live pipeline

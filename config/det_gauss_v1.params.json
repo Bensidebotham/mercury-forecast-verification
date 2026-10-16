@@ -5,105 +5,141 @@
     "2025-06-30"
   ],
   "fit_at": "2026-10-16",
-  "fit_ts": 1792185338.840514,
-  "params": [
-    {
-      "station": "KLAX",
-      "lead_days": 1,
-      "bias": -2.5983,
-      "sigma": 3.5671,
-      "n": 510
-    },
-    {
-      "station": "KLAX",
-      "lead_days": 2,
-      "bias": -3.656,
-      "sigma": 4.644,
-      "n": 509
-    },
-    {
-      "station": "KLGA",
-      "lead_days": 1,
-      "bias": 1.2554,
-      "sigma": 2.7965,
-      "n": 510
-    },
-    {
-      "station": "KLGA",
-      "lead_days": 2,
-      "bias": 1.0166,
-      "sigma": 3.3143,
-      "n": 509
-    },
-    {
-      "station": "KMDW",
-      "lead_days": 1,
-      "bias": 2.2163,
-      "sigma": 2.5791,
-      "n": 513
-    },
-    {
-      "station": "KMDW",
-      "lead_days": 2,
-      "bias": 2.1417,
-      "sigma": 3.3439,
-      "n": 512
-    },
-    {
-      "station": "KMIA",
-      "lead_days": 1,
-      "bias": 2.4788,
-      "sigma": 1.8377,
-      "n": 506
-    },
-    {
-      "station": "KMIA",
-      "lead_days": 2,
-      "bias": 1.7607,
-      "sigma": 1.6798,
-      "n": 505
-    },
-    {
-      "station": "KNYC",
-      "lead_days": 1,
-      "bias": 1.4377,
-      "sigma": 2.9029,
-      "n": 510
-    },
-    {
-      "station": "KNYC",
-      "lead_days": 2,
-      "bias": 0.965,
-      "sigma": 3.515,
-      "n": 509
-    },
-    {
-      "station": "KORD",
-      "lead_days": 1,
-      "bias": 1.5838,
-      "sigma": 2.5341,
-      "n": 513
-    },
-    {
-      "station": "KORD",
-      "lead_days": 2,
-      "bias": 1.8077,
-      "sigma": 3.2036,
-      "n": 512
-    },
-    {
-      "station": "KSFO",
-      "lead_days": 1,
-      "bias": -0.2215,
-      "sigma": 3.862,
-      "n": 510
-    },
-    {
-      "station": "KSFO",
-      "lead_days": 2,
-      "bias": -2.6789,
-      "sigma": 5.2447,
-      "n": 509
-    }
-  ]
+  "fit_ts": 1792188268.456074,
+  "truth_by_venue": {
+    "kalshi": "cli",
+    "polymarket": "metar"
+  },
+  "params": {
+    "cli": [
+      {
+        "station": "KLAX",
+        "lead_days": 1,
+        "bias": -2.5983,
+        "sigma": 3.5671,
+        "n": 510
+      },
+      {
+        "station": "KLAX",
+        "lead_days": 2,
+        "bias": -3.656,
+        "sigma": 4.644,
+        "n": 509
+      },
+      {
+        "station": "KMDW",
+        "lead_days": 1,
+        "bias": 2.2163,
+        "sigma": 2.5791,
+        "n": 513
+      },
+      {
+        "station": "KMDW",
+        "lead_days": 2,
+        "bias": 2.1417,
+        "sigma": 3.3439,
+        "n": 512
+      },
+      {
+        "station": "KMIA",
+        "lead_days": 1,
+        "bias": 2.4788,
+        "sigma": 1.8377,
+        "n": 506
+      },
+      {
+        "station": "KMIA",
+        "lead_days": 2,
+        "bias": 1.7607,
+        "sigma": 1.6798,
+        "n": 505
+      },
+      {
+        "station": "KNYC",
+        "lead_days": 1,
+        "bias": 1.4377,
+        "sigma": 2.9029,
+        "n": 510
+      },
+      {
+        "station": "KNYC",
+        "lead_days": 2,
+        "bias": 0.965,
+        "sigma": 3.515,
+        "n": 509
+      }
+    ],
+    "metar": [
+      {
+        "station": "KLAX",
+        "lead_days": 1,
+        "bias": -3.4717,
+        "sigma": 3.5631,
+        "n": 513
+      },
+      {
+        "station": "KLAX",
+        "lead_days": 2,
+        "bias": -4.5359,
+        "sigma": 4.6281,
+        "n": 512
+      },
+      {
+        "station": "KLGA",
+        "lead_days": 1,
+        "bias": 0.635,
+        "sigma": 2.8334,
+        "n": 513
+      },
+      {
+        "station": "KLGA",
+        "lead_days": 2,
+        "bias": 0.3906,
+        "sigma": 3.3098,
+        "n": 512
+      },
+      {
+        "station": "KMIA",
+        "lead_days": 1,
+        "bias": 1.6606,
+        "sigma": 1.8487,
+        "n": 513
+      },
+      {
+        "station": "KMIA",
+        "lead_days": 2,
+        "bias": 0.9336,
+        "sigma": 1.7018,
+        "n": 512
+      },
+      {
+        "station": "KORD",
+        "lead_days": 1,
+        "bias": 1.0185,
+        "sigma": 2.4769,
+        "n": 513
+      },
+      {
+        "station": "KORD",
+        "lead_days": 2,
+        "bias": 1.2413,
+        "sigma": 3.1463,
+        "n": 512
+      },
+      {
+        "station": "KSFO",
+        "lead_days": 1,
+        "bias": -1.0524,
+        "sigma": 3.9734,
+        "n": 513
+      },
+      {
+        "station": "KSFO",
+        "lead_days": 2,
+        "bias": -3.5248,
+        "sigma": 5.3808,
+        "n": 512
+      }
+    ]
+  }
 }

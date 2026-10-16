@@ -61,3 +61,47 @@ def test_cycle_with_no_markets_is_marked_failed(monkeypatch, tmp_path):
     out = ingest.run_once(_settings(), engine, now=1_000.0)
     assert out["status"] == "failed"
     assert S.read_runs(engine)[0]["status"] == "failed"
+
+
+def _pm_event(closed=False, prices=("0.5", "0.5"), site="klga"):
+    import json
+    def mkt(token, q, bid, ask):
+        return {"question": q, "groupItemTitle": "", "clobTokenIds": json.dumps([token, "no"]),
+                "bestBid": bid, "bestAsk": ask, "closed": closed,
+                "outcomePrices": json.dumps(list(prices)), "endDate": "2099-10-17T12:00:00Z"}
+    return {"slug": "highest-temperature-in-nyc-on-october-17-2099",
+            "title": "Highest temperature in NYC on October 17?", "endDate": "2099-10-17T12:00:00Z",
+            "resolutionSource": f"https://www.weather.gov/wrh/timeseries?site={site}",
+            "markets": [mkt("tokA", "Will the highest temperature in New York City be between 58-59°F "
+                                    "on October 17?", 0.18, 0.22),
+                        mkt("tokB", "Will the highest temperature in New York City be 60°F or higher "
+                                    "on October 17?", None, 0.30)]}
+
+
+def test_polymarket_live_ingest_uses_venue_station_and_two_sided_mid(monkeypatch, tmp_path):
+    engine = S.connect(str(tmp_path / "v.sqlite3"))
+    s = _settings()
+    s.venues.kalshi = []
+    s.venues.polymarket = load_settings().venues.polymarket[:1]       # NYC on KLGA
+    _patch_sources(monkeypatch, members=[58.6] * 30, markets=[])
+    seen = []
+    monkeypatch.setattr(ingest.ph, "find_event",
+                        lambda slug, d: seen.append(d) or (_pm_event() if not seen[1:] else None))
+    out = ingest.run_once(s, engine, now=1_000.0)
+    markets = {m["market_uid"]: m for m in S.read_markets(engine)}
+    assert set(markets) == {"polymarket:tokA", "polymarket:tokB"}
+    assert markets["polymarket:tokA"]["station"] == "KLGA"
+    assert markets["polymarket:tokA"]["event_key"] == "highest-temperature-in-nyc-on-october-17-2099"
+    assert [q["market_prob"] for q in S.read_quotes(engine)] == [0.2]    # tokB is one-sided
+    assert out["preds"] == 2 and out["status"] == "ok"
+
+
+def test_polymarket_event_on_unexpected_station_is_skipped(monkeypatch, tmp_path):
+    engine = S.connect(str(tmp_path / "v.sqlite3"))
+    s = _settings()
+    s.venues.kalshi = []
+    s.venues.polymarket = load_settings().venues.polymarket[:1]
+    _patch_sources(monkeypatch, members=[58.6] * 30, markets=[])
+    monkeypatch.setattr(ingest.ph, "find_event", lambda slug, d: _pm_event(site="kjfk"))
+    out = ingest.run_once(s, engine, now=1_000.0)
+    assert S.read_markets(engine) == [] and out["status"] == "failed"

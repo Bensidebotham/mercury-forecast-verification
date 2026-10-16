@@ -3,10 +3,12 @@
 Only markets already in the store are updated; settlement never invents rows.
 """
 import logging
+import time
 
 from sqlalchemy import Engine
 
 from weather_vs_market.clients import kalshi
+from weather_vs_market.clients import polymarket_history as ph
 from weather_vs_market.config import Settings
 from weather_vs_market.storage import store
 
@@ -46,5 +48,30 @@ def settle_kalshi(settings: Settings, engine: Engine) -> int:
     return n
 
 
+def settle_polymarket(settings: Settings, engine: Engine, now: float | None = None) -> int:
+    """Settle past-close Polymarket markets from their (closed) Gamma event."""
+    now = now if now is not None else time.time()
+    v = store.vmarket
+    pending: dict[str, set[str]] = {}
+    for m in store.read_markets(engine, v.c.venue == "polymarket", v.c.settled == 0,
+                                v.c.close_ts < now):
+        pending.setdefault(m["event_key"], set()).add(m["market_uid"])
+    n = 0
+    for slug, uids in pending.items():
+        try:
+            ev = ph.fetch_event(slug)
+        except Exception as e:
+            log.warning("polymarket event fetch failed for %s: %s", slug, e)
+            continue
+        if ev is None:
+            continue
+        outcomes = [(f"polymarket:{r['token_id']}", r["outcome"]) for r in ph.parse_event(ev)
+                    if r["outcome"] is not None and f"polymarket:{r['token_id']}" in uids]
+        store.settle_markets(engine, outcomes)
+        n += len(outcomes)
+    return n
+
+
 def run_settle(settings: Settings, engine: Engine) -> dict:
-    return {"kalshi": settle_kalshi(settings, engine)}
+    return {"kalshi": settle_kalshi(settings, engine),
+            "polymarket": settle_polymarket(settings, engine)}

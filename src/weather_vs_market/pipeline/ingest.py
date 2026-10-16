@@ -12,11 +12,13 @@ import logging
 import re
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import Engine
 
 from weather_vs_market.clients import kalshi
+from weather_vs_market.clients import polymarket_history as ph
 from weather_vs_market.config import EnsembleConfig, Settings
 from weather_vs_market.forecast import ensemble, obs
 from weather_vs_market.model import buckets as bm
@@ -121,11 +123,57 @@ def _ingest_kalshi(settings: Settings, forecasts: Forecasts, cycle: Cycle) -> No
                 cycle.errors.append(f"kalshi {raw.get('ticker')}: {e}")
 
 
+def polymarket_markets(ev: dict, city: str, station: str) -> list[tuple[dict, float | None, float | None]]:
+    """(unified market, best bid, best ask) for each parseable bucket of a Gamma event."""
+    out = []
+    target = ph.event_date(ev)
+    for mkt in ev.get("markets") or []:
+        tokens = json.loads(mkt.get("clobTokenIds") or "[]")
+        parsed = bm.parse_bucket(mkt.get("question") or "") or bm.parse_us_bucket(
+            mkt.get("groupItemTitle") or "")
+        if not tokens or parsed is None or parsed[2] != "F" or target is None:
+            continue
+        end = mkt.get("endDate") or ev.get("endDate")
+        out.append(({
+            "market_uid": f"polymarket:{tokens[0]}", "venue": "polymarket", "external_id": tokens[0],
+            "event_key": ev.get("slug"), "city": city, "station": station,
+            "target_date": target.isoformat(), "bucket_lo": parsed[0], "bucket_hi": parsed[1],
+            "unit": "F", "question": mkt.get("question"),
+            "close_ts": datetime.fromisoformat(end.replace("Z", "+00:00")).timestamp() if end else None,
+        }, mkt.get("bestBid"), mkt.get("bestAsk")))
+    return out
+
+
+def _ingest_polymarket(settings: Settings, forecasts: Forecasts, cycle: Cycle) -> None:
+    for venue_city in settings.venues.polymarket:
+        today = datetime.fromtimestamp(cycle.now, ZoneInfo(settings.station(venue_city.station).tz)).date()
+        for d in (today + timedelta(days=i) for i in range(3)):
+            try:
+                ev = ph.find_event(venue_city.slug, d)
+            except Exception as e:
+                cycle.errors.append(f"polymarket {venue_city.slug} {d}: {e}")
+                continue
+            if ev is None or ev.get("closed"):
+                continue
+            station = ph.resolution_station(ev)
+            if station != venue_city.station:
+                cycle.errors.append(f"polymarket {ev.get('slug')}: settles on {station}, "
+                                    f"expected {venue_city.station}")
+                continue
+            for u, bid, ask in polymarket_markets(ev, venue_city.city, station):
+                if not validate_unified(u):
+                    continue
+                model_p = ensemble_prob(forecasts.get(station, u["target_date"]),
+                                        u["bucket_lo"], u["bucket_hi"], settings.ensemble)
+                cycle.add(u, bid, ask, kalshi.market_prob_from_quote(bid, ask), model_p)
+
+
 def run_once(settings: Settings, engine: Engine, now: float | None = None) -> dict:
     started = time.time()
     cycle = Cycle(now if now is not None else started)
     forecasts = Forecasts(settings)
     _ingest_kalshi(settings, forecasts, cycle)
+    _ingest_polymarket(settings, forecasts, cycle)
 
     store.upsert_markets(engine, cycle.markets)
     store.insert_quotes(engine, cycle.quotes)

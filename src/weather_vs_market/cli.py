@@ -65,6 +65,15 @@ def fit():
     rprint(f"wrote {len(doc['params'])} (station, lead) fits -> {PARAMS_FILE}")
 
 
+@app.command(name="fit-locked")
+def fit_locked():
+    """Fit the CLI-vs-hourly-METAR gap per station (training window) for locked days."""
+    from weather_vs_market.pipeline.fit import LOCKED_FILE, run_fit_locked
+    doc = run_fit_locked(load_settings())
+    rprint(doc["stations"])
+    rprint(f"-> {LOCKED_FILE}")
+
+
 backtest_app = typer.Typer(no_args_is_help=True, help="Retroactive backtest (see docs/PROTOCOL.md).")
 app.add_typer(backtest_app, name="backtest")
 

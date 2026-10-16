@@ -22,6 +22,7 @@ from weather_vs_market.clients import polymarket_history as ph
 from weather_vs_market.config import EnsembleConfig, Settings
 from weather_vs_market.forecast import ensemble, obs
 from weather_vs_market.model import buckets as bm
+from weather_vs_market.pipeline.fit import load_locked_params
 from weather_vs_market.storage import store
 
 log = logging.getLogger("wvm.ingest")
@@ -48,6 +49,11 @@ class Forecasts:
     def __init__(self, settings: Settings):
         self.settings = settings
         self._cache: dict[tuple[str, str], tuple] = {}
+        self.locked_params = load_locked_params()
+
+    def prob(self, station_id: str, target_date: str, lo: float | None, hi: float | None) -> float | None:
+        return ensemble_prob(self.get(station_id, target_date), lo, hi, self.settings.ensemble,
+                             station=station_id, locked_params=self.locked_params)
 
     def get(self, station_id: str, target_date: str) -> tuple:
         key = (station_id, target_date)
@@ -61,16 +67,23 @@ class Forecasts:
         return self._cache[key]
 
 
-def ensemble_prob(inputs: tuple, lo: float | None, hi: float | None,
-                  cfg: EnsembleConfig) -> float | None:
-    """ens_kernel_v1 probability for one bucket, or None if there is no forecast."""
+def ensemble_prob(inputs: tuple, lo: float | None, hi: float | None, cfg: EnsembleConfig,
+                  station: str | None = None, locked_params: dict | None = None) -> float | None:
+    """ens_kernel_v1 probability for one bucket, or None if there is no forecast.
+
+    On a locked day the distribution centers on the running max plus the
+    station's fitted CLI-vs-METAR bias (config/locked_obs.params.json), falling
+    back to the global settings when a station has no fit.
+    """
     members, running, locked = inputs
+    lp = (locked_params or {}).get(station or "")
+    bias = lp["bias"] if lp else cfg.locked_bias_f
+    sigma = lp["sigma"] if lp else cfg.locked_sigma_f
     obs_max = None
     if running is not None:
-        obs_max = running + cfg.locked_bias_f if locked else running - cfg.obs_buffer_f
+        obs_max = running + bias if locked else running - cfg.obs_buffer_f
     try:
-        return bm.bucket_probability(members, lo, hi, cfg.kernel_sigma_f, obs_max, locked,
-                                     cfg.locked_sigma_f)
+        return bm.bucket_probability(members, lo, hi, cfg.kernel_sigma_f, obs_max, locked, sigma)
     except ValueError:
         return None
 
@@ -115,8 +128,7 @@ def _ingest_kalshi(settings: Settings, forecasts: Forecasts, cycle: Cycle) -> No
                 if u is None or not validate_unified(u):
                     continue
                 u["station"] = venue_city.station
-                model_p = ensemble_prob(forecasts.get(venue_city.station, target_date),
-                                        u["bucket_lo"], u["bucket_hi"], settings.ensemble)
+                model_p = forecasts.prob(venue_city.station, target_date, u["bucket_lo"], u["bucket_hi"])
                 cycle.add(u, u["yes_bid"], u["yes_ask"],
                           kalshi.market_prob_from_quote(u["yes_bid"], u["yes_ask"]), model_p)
             except Exception as e:
@@ -163,8 +175,7 @@ def _ingest_polymarket(settings: Settings, forecasts: Forecasts, cycle: Cycle) -
             for u, bid, ask in polymarket_markets(ev, venue_city.city, station):
                 if not validate_unified(u):
                     continue
-                model_p = ensemble_prob(forecasts.get(station, u["target_date"]),
-                                        u["bucket_lo"], u["bucket_hi"], settings.ensemble)
+                model_p = forecasts.prob(station, u["target_date"], u["bucket_lo"], u["bucket_hi"])
                 cycle.add(u, bid, ask, kalshi.market_prob_from_quote(bid, ask), model_p)
 
 

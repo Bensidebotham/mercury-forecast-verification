@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# written locally by `uv run wvm publish --out frontend/public/evaluations.json`
+/public/evaluations.json

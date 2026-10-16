@@ -1,16 +1,13 @@
-export default function Footer() {
+import { REPO_URL } from './Header'
+
+export default function Footer({ generatedTs }: { generatedTs: number | null }) {
   return (
-    <footer className="mt-16 py-8 border-t border-[var(--color-border)] text-center text-sm text-[var(--color-muted)]">
-      <p>Read-only research dashboard — not financial advice.</p>
-      <p className="mt-1">
-        Data refreshes on a schedule ·{' '}
-        <a
-          href="https://github.com/Bensidebotham/mercury-forecast-verification"
-          className="underline hover:text-[var(--color-text)] transition-colors duration-150 motion-reduce:transition-none"
-        >
-          GitHub
-        </a>
-      </p>
+    <footer className="border-t border-[var(--color-border)] pt-6 text-xs text-[var(--color-muted)] flex flex-wrap justify-between gap-2">
+      <span>Read-only research. No orders are placed anywhere in this project.</span>
+      <span>
+        {generatedTs ? `Data published ${new Date(generatedTs * 1000).toUTCString()}` : 'No data published yet'} ·{' '}
+        <a className="underline hover:text-[var(--color-text)]" href={REPO_URL}>GitHub</a>
+      </span>
     </footer>
   )
 }

@@ -14,18 +14,18 @@ const firaSans = Fira_Sans({
 })
 
 export const metadata: Metadata = {
-  title: 'Mercury — Forecast vs. Market',
+  title: 'weather-vs-market — Weather Models vs. Prediction Markets',
   description:
     'Live accuracy dashboard: does a weather model beat the prediction market on temperature forecasts?',
   openGraph: {
-    title: 'Mercury — Forecast vs. Market',
+    title: 'weather-vs-market — Weather Models vs. Prediction Markets',
     description:
       'Live accuracy dashboard: does a weather model beat the prediction market on temperature forecasts?',
     type: 'website',
   },
   twitter: {
     card: 'summary',
-    title: 'Mercury — Forecast vs. Market',
+    title: 'weather-vs-market — Weather Models vs. Prediction Markets',
     description:
       'Live accuracy dashboard: does a weather model beat the prediction market on temperature forecasts?',
   },

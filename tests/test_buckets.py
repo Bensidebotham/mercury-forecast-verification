@@ -1,6 +1,8 @@
 import math
 
-from polybot.model.buckets import bucket_probability, ladder_probabilities, parse_bucket
+import pytest
+
+from weather_vs_market.model.buckets import bucket_probability, ladder_probabilities, parse_bucket
 
 
 def test_parse_between():
@@ -60,3 +62,29 @@ def test_locked_day_collapses_to_obs():
     assert p > 0.9
     p_wrong = bucket_probability(members, 88, 89, sigma=1.5, obs_max=82.4, locked=True)
     assert p_wrong < 0.01
+
+
+def test_no_members_and_no_locked_obs_is_an_error_not_zero():
+    # A failed ensemble fetch must never turn into a confident P=0.0.
+    with pytest.raises(ValueError):
+        bucket_probability([], 82, 83)
+    with pytest.raises(ValueError):
+        bucket_probability([], 82, 83, obs_max=80.0, locked=False)
+
+
+def test_locked_day_needs_no_members():
+    assert bucket_probability([], 82, 83, obs_max=82.4, locked=True, locked_sigma=0.5) > 0.9
+
+
+@pytest.mark.parametrize("label,expected", [
+    ("70-71°F", (70.0, 71.0, "F")),
+    ("63°F or below", (None, 63.0, "F")),
+    ("74°F or higher", (74.0, None, "F")),
+    ("65 to 66", (65.0, 66.0, "F")),
+    ("64 or below", (None, 64.0, "F")),
+    ("73 or above", (73.0, None, "F")),
+    ("cloudy", None),
+])
+def test_parse_us_bucket_labels(label, expected):
+    from weather_vs_market.model.buckets import parse_us_bucket
+    assert parse_us_bucket(label) == expected

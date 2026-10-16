@@ -1,0 +1,25 @@
+name: dump
+on:
+  schedule:
+    - cron: "41 6 * * 1"   # weekly, Monday 06:41 UTC
+  workflow_dispatch: {}
+permissions:
+  contents: write
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --locked
+      - run: uv run wvm dump --out dump
+      # One rolling release holds the latest snapshot of every table, so anyone
+      # can rerun the analysis without database credentials.
+      - run: |
+          gh release view data-latest >/dev/null 2>&1 || \
+            gh release create data-latest --title "Latest data snapshot" \
+              --notes "Weekly Parquet dump of every table. See README: Reproduce."
+          gh release upload data-latest dump/*.parquet --clobber

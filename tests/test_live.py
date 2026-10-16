@@ -1,64 +1,53 @@
 import time
-from polybot.analysis import live
-from polybot.storage import verify_db
 
-def _seed(conn, uid, settled, model_p, market_p, close_ts):
-    verify_db.upsert_market(conn, {"market_uid": uid, "venue": "kalshi", "external_id": uid.split(":")[1],
-        "city": "New York", "target_date": "2026-06-23", "bucket_lo": 75.0, "bucket_hi": 76.0,
-        "unit": "F", "question": f"q {uid}", "close_ts": close_ts})
-    verify_db.insert_quote(conn, uid, time.time(), market_p, market_p-0.02, market_p+0.02)
-    verify_db.insert_pred(conn, uid, time.time(), model_p, 24.0)
+from conftest import market
+from weather_vs_market.analysis import live
+from weather_vs_market.storage import store as S
+
+NOW = 1_800_000_000.0
+
+
+def _seed(engine, uid, model_p, market_p, close_ts, settled=False):
+    S.upsert_markets(engine, [market(uid, close_ts=close_ts)])
+    S.insert_quotes(engine, [{"ts": NOW - 60, "market_uid": uid, "market_prob": market_p,
+                              "best_bid": None, "best_ask": None, "source": "live"}])
+    S.insert_preds(engine, [{"ts": NOW - 60, "market_uid": uid, "model": "m1",
+                             "model_prob": model_p, "lead_hours": 24.0}])
     if settled:
-        verify_db.settle_market(conn, uid, 1)
+        S.settle_markets(engine, [(uid, 1)])
 
-def test_current_disagreements_ranks_by_abs_edge_and_excludes_settled(tmp_path):
-    conn = verify_db.connect(str(tmp_path / "v.sqlite3"))
-    future = time.time() + 24*3600
-    _seed(conn, "kalshi:A", False, model_p=0.80, market_p=0.50, close_ts=future)  # edge +0.30
-    _seed(conn, "kalshi:B", False, model_p=0.40, market_p=0.45, close_ts=future)  # edge -0.05
-    _seed(conn, "kalshi:C", True,  model_p=0.90, market_p=0.10, close_ts=future)  # settled -> excluded
-    rows = live.current_disagreements(conn, limit=10)
-    assert [r["market_uid"] for r in rows] == ["kalshi:A", "kalshi:B"]  # A first (bigger |edge|), C excluded
-    assert rows[0]["edge"] == 0.30 and rows[0]["model_prob"] == 0.80 and rows[0]["market_prob"] == 0.50
-    assert rows[0]["lead_hours"] is not None and rows[0]["lead_hours"] >= 0
 
-def test_current_disagreements_skips_markets_missing_a_side(tmp_path):
-    conn = verify_db.connect(str(tmp_path / "v.sqlite3"))
-    future = time.time() + 24*3600
-    verify_db.upsert_market(conn, {"market_uid": "kalshi:D", "venue": "kalshi", "external_id": "D",
-        "city": "NYC", "target_date": "2026-06-23", "bucket_lo": 75.0, "bucket_hi": 76.0,
-        "unit": "F", "question": "q", "close_ts": future})
-    verify_db.insert_pred(conn, "kalshi:D", time.time(), 0.7, 24.0)  # model only, no quote
-    assert live.current_disagreements(conn) == []
+def test_disagreements_rank_by_abs_gap_and_exclude_settled(engine):
+    future = NOW + 24 * 3600
+    _seed(engine, "kalshi:A", 0.80, 0.50, future)
+    _seed(engine, "kalshi:B", 0.40, 0.45, future)
+    _seed(engine, "kalshi:C", 0.90, 0.10, future, settled=True)
+    rows = live.current_disagreements(engine, model="m1", now=NOW)
+    assert [r["market_uid"] for r in rows] == ["kalshi:A", "kalshi:B"]
+    assert rows[0]["gap"] == 0.30 and rows[0]["lead_hours"] == 24.0
 
-def test_current_disagreements_excludes_past_close_markets(tmp_path):
-    import time
-    from polybot.analysis import live
-    from polybot.storage import verify_db
-    conn = verify_db.connect(str(tmp_path / "v.sqlite3"))
-    past = time.time() - 3600        # closed an hour ago
-    future = time.time() + 24*3600
-    # past-close market with a huge edge -> must be EXCLUDED
-    verify_db.upsert_market(conn, {"market_uid": "kalshi:PAST", "venue": "kalshi", "external_id": "PAST",
-        "city": "NYC", "target_date": "2026-06-22", "bucket_lo": 75.0, "bucket_hi": 76.0,
-        "unit": "F", "question": "q", "close_ts": past})
-    verify_db.insert_quote(conn, "kalshi:PAST", time.time(), 0.99, 0.98, 1.0)
-    verify_db.insert_pred(conn, "kalshi:PAST", time.time(), 0.0, 0.0)
-    # genuinely-open market with a modest edge -> must be INCLUDED
-    verify_db.upsert_market(conn, {"market_uid": "kalshi:OPEN", "venue": "kalshi", "external_id": "OPEN",
-        "city": "NYC", "target_date": "2026-06-24", "bucket_lo": 75.0, "bucket_hi": 76.0,
-        "unit": "F", "question": "q", "close_ts": future})
-    verify_db.insert_quote(conn, "kalshi:OPEN", time.time(), 0.50, 0.48, 0.52)
-    verify_db.insert_pred(conn, "kalshi:OPEN", time.time(), 0.65, 24.0)
-    rows = live.current_disagreements(conn)
-    assert [r["market_uid"] for r in rows] == ["kalshi:OPEN"]
 
-def test_tracking_summary_counts(tmp_path):
-    conn = verify_db.connect(str(tmp_path / "v.sqlite3"))
-    future = time.time() + 24*3600
-    _seed(conn, "kalshi:A", False, 0.8, 0.5, future)
-    _seed(conn, "kalshi:C", True, 0.9, 0.1, future)
-    s = live.tracking_summary(conn)
-    assert s["n_markets"] == 2 and s["n_open"] == 1 and s["n_settled"] == 1
-    assert s["n_quotes"] == 2 and s["n_preds"] == 2 and s["n_cities"] == 1
-    assert s["last_snapshot_ts"] is not None
+def test_disagreements_skip_markets_missing_a_side_or_past_close(engine):
+    S.upsert_markets(engine, [market("kalshi:D", close_ts=NOW + 3600 * 24)])
+    S.insert_preds(engine, [{"ts": NOW, "market_uid": "kalshi:D", "model": "m1",
+                             "model_prob": 0.7, "lead_hours": 24.0}])
+    _seed(engine, "kalshi:PAST", 0.0, 0.99, NOW - 3600)
+    assert live.current_disagreements(engine, model="m1", now=NOW) == []
+
+
+def test_disagreements_ignore_other_models_and_backtest_quotes(engine):
+    _seed(engine, "kalshi:A", 0.80, 0.50, NOW + 24 * 3600)
+    S.insert_quotes(engine, [{"ts": NOW, "market_uid": "kalshi:A", "market_prob": 0.9,
+                              "best_bid": None, "best_ask": None, "source": "kalshi_candles"}])
+    assert live.current_disagreements(engine, model="other", now=NOW) == []
+    assert live.current_disagreements(engine, model="m1", now=NOW)[0]["market_prob"] == 0.50
+
+
+def test_tracking_summary_counts(engine):
+    _seed(engine, "kalshi:A", 0.8, 0.5, NOW + 24 * 3600)
+    _seed(engine, "kalshi:C", 0.9, 0.1, NOW + 24 * 3600, settled=True)
+    S.record_run(engine, {"run_id": "r", "started_ts": time.time(), "status": "ok"})
+    s = live.tracking_summary(engine)
+    assert (s["n_markets"], s["n_open"], s["n_settled"]) == (2, 1, 1)
+    assert s["n_live_quotes"] == 2 and s["n_preds"] == 2
+    assert s["last_run"]["status"] == "ok"

@@ -1,4 +1,5 @@
 """Shared HTTP plumbing for the API clients: one User-Agent, retries, pacing."""
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -19,17 +20,24 @@ def session(client: httpx.Client | None, timeout: float = 30) -> Iterator[httpx.
 
 
 class Pacer:
-    """Keeps at least `min_interval_s` between requests (per host, per process)."""
+    """Keeps at least `min_interval_s` between requests (per host, per process).
+
+    Thread-safe: worker threads share one budget, so concurrency hides latency
+    without exceeding the host's rate limit.
+    """
 
     def __init__(self, min_interval_s: float):
         self.min_interval_s = min_interval_s
-        self._last = 0.0
+        self._next = 0.0
+        self._lock = threading.Lock()
 
     def wait(self) -> None:
-        delay = self.min_interval_s - (time.monotonic() - self._last)
-        if delay > 0:
-            time.sleep(delay)
-        self._last = time.monotonic()
+        with self._lock:
+            now = time.monotonic()
+            slot = max(now, self._next)
+            self._next = slot + self.min_interval_s
+        if slot > now:
+            time.sleep(slot - now)
 
 
 def get(client: httpx.Client, url: str, params=None, *, pacer: Pacer | None = None,

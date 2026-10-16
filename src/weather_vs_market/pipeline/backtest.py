@@ -13,6 +13,7 @@ import json
 import logging
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
 from sqlalchemy import Engine
@@ -98,7 +99,7 @@ def _flush(engine: Engine, markets: list[dict], outcomes: list, quotes: list[dic
 
 
 def collect_kalshi(settings: Settings, engine: Engine, start: str, end: str,
-                   only: str | None = None) -> dict:
+                   only: str | None = None, workers: int = 4) -> dict:
     lps, tol = lead_points(settings), TOLERANCE_S
     source = SOURCES["kalshi"]
     done = _quoted_uids(engine, source, len(lps))
@@ -108,8 +109,7 @@ def collect_kalshi(settings: Settings, engine: Engine, start: str, end: str,
         if only and vc.series != only:
             continue
         tz = settings.station(vc.station).tz
-        markets, outcomes, quotes = [], [], []
-        n_markets = n_quotes = 0
+        todo = []
         for raw in kh.fetch_settled_markets(vc.series):
             d = target_date_from_ticker(raw["ticker"])
             if not _in(d, start, end):
@@ -119,22 +119,26 @@ def collect_kalshi(settings: Settings, engine: Engine, start: str, end: str,
             if u is None or not validate_unified(u) or outcome is None:
                 continue
             u["station"] = vc.station
-            markets.append(u)
-            outcomes.append((u["market_uid"], outcome))
+            todo.append((raw, u, outcome, [lp.timestamp(d, tz) for lp in lps]))
+
+        def lead_quotes(item, series: str = vc.series) -> list[dict]:
+            raw, u, _, point_ts = item
             if u["market_uid"] in done:
-                continue
-            point_ts = [lp.timestamp(d, tz) for lp in lps]
-            candles = kh.fetch_hourly_quotes(vc.series, raw["ticker"], int(min(point_ts) - tol - 3600),
+                return []
+            candles = kh.fetch_hourly_quotes(series, raw["ticker"], int(min(point_ts) - tol - 3600),
                                              int(max(point_ts) + 3600), kh.is_historical(raw, cutoff))
             priced = [(c["ts"], p) for c in candles if (p := kalshi_price(c)) is not None]
-            quotes += _lead_quotes(u["market_uid"], priced, point_ts, tol, source)
-            if len(markets) >= FLUSH_EVERY:
-                n_markets, n_quotes = n_markets + len(markets), n_quotes + len(quotes)
-                _flush(engine, markets, outcomes, quotes)
-        n_markets, n_quotes = n_markets + len(markets), n_quotes + len(quotes)
-        _flush(engine, markets, outcomes, quotes)
-        log.info("kalshi %s: %d markets, %d quotes", vc.series, n_markets, n_quotes)
-        counts["markets"] += n_markets
+            return _lead_quotes(u["market_uid"], priced, point_ts, tol, source)
+
+        n_quotes = 0
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for i in range(0, len(todo), FLUSH_EVERY):
+                batch = todo[i:i + FLUSH_EVERY]
+                quotes = [q for qs in pool.map(lead_quotes, batch) for q in qs]
+                _flush(engine, [b[1] for b in batch], [(b[1]["market_uid"], b[2]) for b in batch], quotes)
+                n_quotes += len(quotes)
+        log.info("kalshi %s: %d markets, %d quotes", vc.series, len(todo), n_quotes)
+        counts["markets"] += len(todo)
         counts["quotes"] += n_quotes
     return counts
 

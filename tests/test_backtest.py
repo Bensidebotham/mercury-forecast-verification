@@ -115,3 +115,10 @@ def test_forecast_uses_metar_truth_params_for_polymarket(monkeypatch, tmp_path):
         ("KLGA", 1): D.Params(0, 1, 100), ("KLGA", 2): D.Params(0, 1, 100)})
     B.forecast(settings, engine, "2025-07-01", "2025-07-31")
     assert set(used) == {"metar"}
+
+
+def test_polymarket_bucket_survives_question_typos():
+    # Real 2025-05-04 NYC question: "be tween" instead of "between"
+    row = {"question": "Will the highest temperature in NYC be be tween 70-71°F on May 4?",
+           "bucket": "70-71°F"}
+    assert B._polymarket_bucket(row) == (70.0, 71.0)

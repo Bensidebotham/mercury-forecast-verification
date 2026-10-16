@@ -31,11 +31,12 @@ def parse_bucket(question: str) -> tuple[float | None, float | None, str] | None
     return None
 
 
-# Polymarket US bucket labels ("titleShort"): "64 or below", "65 to 66",
-# "73 or above". Unit is always Fahrenheit for the US climate markets.
-_US_BELOW = re.compile(r"(\d+)\s*or\s*below", re.I)
-_US_ABOVE = re.compile(r"(\d+)\s*or\s*above", re.I)
-_US_RANGE = re.compile(r"(\d+)\s*to\s*(\d+)", re.I)
+# Polymarket bucket labels ("groupItemTitle"): "64 or below", "65 to 66",
+# "70-71°F", "63°F or below", "74°F or higher". Fahrenheit for US cities. The label
+# is more reliable than the question, which has typos ("be tween 70-71°F").
+_US_BELOW = re.compile(r"(\d+)\s*°?\s*F?\s*or\s*(?:below|lower)", re.I)
+_US_ABOVE = re.compile(r"(\d+)\s*°?\s*F?\s*or\s*(?:above|higher)", re.I)
+_US_RANGE = re.compile(r"(\d+)\s*(?:to|-|–)\s*(\d+)", re.I)
 
 
 def parse_us_bucket(label: str) -> tuple[float | None, float | None, str] | None:

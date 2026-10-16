@@ -141,8 +141,8 @@ def polymarket_markets(ev: dict, city: str, station: str) -> list[tuple[dict, fl
     target = ph.event_date(ev)
     for mkt in ev.get("markets") or []:
         tokens = json.loads(mkt.get("clobTokenIds") or "[]")
-        parsed = bm.parse_bucket(mkt.get("question") or "") or bm.parse_us_bucket(
-            mkt.get("groupItemTitle") or "")
+        parsed = bm.parse_us_bucket(mkt.get("groupItemTitle") or "") or bm.parse_bucket(
+            mkt.get("question") or "")
         if not tokens or parsed is None or parsed[2] != "F" or target is None:
             continue
         end = mkt.get("endDate") or ev.get("endDate")

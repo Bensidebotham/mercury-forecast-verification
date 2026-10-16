@@ -162,7 +162,7 @@ def collect_kalshi(settings: Settings, engine: Engine, start: str, end: str,
 
 
 def _polymarket_bucket(row: dict) -> tuple[float | None, float | None] | None:
-    parsed = bm.parse_bucket(row["question"]) or bm.parse_us_bucket(row["bucket"])
+    parsed = bm.parse_us_bucket(row["bucket"]) or bm.parse_bucket(row["question"])
     if parsed is None or parsed[2] != "F":
         return None
     return parsed[0], parsed[1]

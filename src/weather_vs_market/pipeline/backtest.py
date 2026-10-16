@@ -159,8 +159,8 @@ def collect_kalshi(settings: Settings, engine: Engine, start: str, end: str,
             for i in range(0, len(todo), FLUSH_EVERY):
                 batch = todo[i:i + FLUSH_EVERY]
                 quotes = [q for qs in pool.map(lead_quotes, batch) for q in qs]
+                n_quotes += len(quotes)       # before _flush, which clears the list
                 _flush(engine, [b[1] for b in batch], [(b[1]["market_uid"], b[2]) for b in batch], quotes)
-                n_quotes += len(quotes)
         log.info("kalshi %s: %d markets, %d quotes", vc.series, len(todo), n_quotes)
         counts["markets"] += len(todo)
         counts["quotes"] += n_quotes

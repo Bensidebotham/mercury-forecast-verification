@@ -122,3 +122,9 @@ def test_polymarket_bucket_survives_question_typos():
     row = {"question": "Will the highest temperature in NYC be be tween 70-71°F on May 4?",
            "bucket": "70-71°F"}
     assert B._polymarket_bucket(row) == (70.0, 71.0)
+
+
+def test_collect_reports_the_quotes_it_wrote(stubbed):
+    settings, engine = stubbed
+    counts = B.collect_kalshi(settings, engine, "2025-07-01", "2025-07-31", workers=2)
+    assert counts["quotes"] == len(S.read_quotes(engine)) == 6

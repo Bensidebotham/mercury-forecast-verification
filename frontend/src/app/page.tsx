@@ -7,7 +7,7 @@ import LiveSection from '@/components/LiveSection'
 import Method from '@/components/Method'
 import Footer from '@/components/Footer'
 import { loadDashboard } from '@/lib/data'
-import { VENUE_LABEL, verdict } from '@/lib/format'
+import { VENUE_LABEL, monthSpan, verdict } from '@/lib/format'
 
 // The pipeline publishes hourly; re-read the newest document at most every 10 minutes.
 export const revalidate = 600
@@ -23,7 +23,10 @@ export default async function Page() {
       {backtest && venues.length > 0 ? (
         <>
           <Headline backtest={backtest} />
-          <DiffChart rows={venues.flatMap(([venue, v]) => v.summary.map((s) => ({ venue, s })))} />
+          <DiffChart
+            rows={venues.flatMap(([venue, v]) => v.summary.map((s) => ({ venue, s })))}
+            windowLabel={`${backtest.window_name} window, ${monthSpan(backtest.window)}`}
+          />
           <CalibrationChart venues={backtest.venues} />
           <CityTable backtest={backtest} />
         </>

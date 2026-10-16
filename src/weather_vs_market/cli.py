@@ -87,11 +87,12 @@ def _window(name: str) -> tuple[str, str]:
 
 @backtest_app.command("collect")
 def backtest_collect(venue: str = typer.Argument(..., help="kalshi | polymarket"),
-                     window: str = typer.Option("test", help="train | dev | test")):
+                     window: str = typer.Option("test", help="train | dev | test"),
+                     only: str = typer.Option("", help="One Kalshi series or Polymarket city slug.")):
     """Settled ladders, results and lead-point prices for a window."""
     from weather_vs_market.pipeline import backtest as B
     fn = {"kalshi": B.collect_kalshi, "polymarket": B.collect_polymarket}[venue]
-    rprint(fn(load_settings(), _engine(), *_window(window)))
+    rprint(fn(load_settings(), _engine(), *_window(window), only=only or None))
 
 
 @backtest_app.command("forecast")
@@ -111,6 +112,15 @@ def backtest_score(window: str = typer.Option("test", help="dev | test")):
             lo, hi = r["brier_diff_ci"]
             rprint(f"{venue:10} {r['lead']:9} n={r['n_events']:4}  Brier model {r['model_brier']:.4f}"
                    f" market {r['market_brier']:.4f}  diff {r['brier_diff']:+.4f} [{lo:+.4f}, {hi:+.4f}]")
+
+
+@backtest_app.command("report")
+def backtest_report():
+    """Regenerate the README results block and docs/RESULTS.md from results/backtest_test.json."""
+    from weather_vs_market.config import ROOT
+    from weather_vs_market.pipeline.report import write_reports
+    write_reports(ROOT / "results" / "backtest_test.json", ROOT / "README.md", ROOT / "docs" / "RESULTS.md")
+    rprint("updated README.md and docs/RESULTS.md")
 
 
 @app.command()

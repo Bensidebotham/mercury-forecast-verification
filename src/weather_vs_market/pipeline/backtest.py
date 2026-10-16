@@ -85,15 +85,31 @@ def _lead_quotes(uid: str, points: list[tuple[float, float]], point_ts: list[flo
     return rows
 
 
-def collect_kalshi(settings: Settings, engine: Engine, start: str, end: str) -> dict:
+FLUSH_EVERY = 200   # markets; keeps a long collection resumable mid-series
+
+
+def _flush(engine: Engine, markets: list[dict], outcomes: list, quotes: list[dict]) -> None:
+    store.upsert_markets(engine, markets)
+    store.settle_markets(engine, outcomes)
+    store.insert_quotes(engine, quotes)
+    markets.clear()
+    outcomes.clear()
+    quotes.clear()
+
+
+def collect_kalshi(settings: Settings, engine: Engine, start: str, end: str,
+                   only: str | None = None) -> dict:
     lps, tol = lead_points(settings), TOLERANCE_S
     source = SOURCES["kalshi"]
     done = _quoted_uids(engine, source, len(lps))
     cutoff = kh.fetch_cutoff()
     counts = {"markets": 0, "quotes": 0}
     for vc in settings.venues.kalshi:
+        if only and vc.series != only:
+            continue
         tz = settings.station(vc.station).tz
         markets, outcomes, quotes = [], [], []
+        n_markets = n_quotes = 0
         for raw in kh.fetch_settled_markets(vc.series):
             d = target_date_from_ticker(raw["ticker"])
             if not _in(d, start, end):
@@ -112,12 +128,14 @@ def collect_kalshi(settings: Settings, engine: Engine, start: str, end: str) -> 
                                              int(max(point_ts) + 3600), kh.is_historical(raw, cutoff))
             priced = [(c["ts"], p) for c in candles if (p := kalshi_price(c)) is not None]
             quotes += _lead_quotes(u["market_uid"], priced, point_ts, tol, source)
-        store.upsert_markets(engine, markets)
-        store.settle_markets(engine, outcomes)
-        store.insert_quotes(engine, quotes)
-        log.info("kalshi %s: %d markets, %d quotes", vc.series, len(markets), len(quotes))
-        counts["markets"] += len(markets)
-        counts["quotes"] += len(quotes)
+            if len(markets) >= FLUSH_EVERY:
+                n_markets, n_quotes = n_markets + len(markets), n_quotes + len(quotes)
+                _flush(engine, markets, outcomes, quotes)
+        n_markets, n_quotes = n_markets + len(markets), n_quotes + len(quotes)
+        _flush(engine, markets, outcomes, quotes)
+        log.info("kalshi %s: %d markets, %d quotes", vc.series, n_markets, n_quotes)
+        counts["markets"] += n_markets
+        counts["quotes"] += n_quotes
     return counts
 
 
@@ -128,12 +146,15 @@ def _polymarket_bucket(row: dict) -> tuple[float | None, float | None] | None:
     return parsed[0], parsed[1]
 
 
-def collect_polymarket(settings: Settings, engine: Engine, start: str, end: str) -> dict:
+def collect_polymarket(settings: Settings, engine: Engine, start: str, end: str,
+                       only: str | None = None) -> dict:
     lps, tol = lead_points(settings), TOLERANCE_S
     source = SOURCES["polymarket"]
     done = _quoted_uids(engine, source, len(lps))
     counts = {"markets": 0, "quotes": 0, "station_mismatch_events": 0}
     for vc in settings.venues.polymarket:
+        if only and vc.slug != only:
+            continue
         tz = settings.station(vc.station).tz
         events = ph.dedupe_by_date(ph.fetch_series_events(ph.CITY_SERIES[vc.slug]))
         markets, outcomes, quotes = [], [], []
@@ -270,7 +291,8 @@ def score(settings: Settings, engine: Engine, window: tuple[str, str], name: str
                                 "model_brier": V.mean([e["model_brier"] for e in c]),
                                 "market_brier": V.mean([e["market_brier"] for e in c])})
         doc["venues"][venue] = {
-            "summary": V.summarize(events), "calibration": calibration, "by_city": by_city,
+            "summary": V.summarize(events, order=[lp.name for lp in lps]),
+            "calibration": calibration, "by_city": by_city,
             "stats": stats,
             "date_span": [min(e["target_date"] for e in events),
                           max(e["target_date"] for e in events)] if events else None,

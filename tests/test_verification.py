@@ -130,3 +130,10 @@ def test_date_window_and_drop_reasons_are_reported(engine):
                           date_range=("2026-06-01", "2026-06-30"), stats=stats)
     assert [e["event_key"] for e in frame] == ["EV1"]
     assert stats == {"events_in_window": 2, "scored": 1, "missing_market": 1}
+
+
+def test_summary_rows_follow_lead_order():
+    base = {"model_brier": 0.2, "market_brier": 0.3, "model_rps": 0.1, "market_rps": 0.1,
+            "model_logscore": 1.0, "market_logscore": 1.0}
+    events = [{**base, "lead": "B"}, {**base, "lead": "A"}]
+    assert [r["lead"] for r in V.summarize(events, n_boot=10, order=["A", "B"])] == ["A", "B"]

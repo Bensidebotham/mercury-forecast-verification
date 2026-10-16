@@ -33,7 +33,9 @@ def live_scores(settings: Settings, engine: Engine) -> dict:
                                lead_points=lead_points(settings),
                                tz_for_city=settings.city_timezones(venue), quote_sources=("live",),
                                tolerance_s=settings.evaluation.tolerance_hours * 3600)
-        out[venue] = {"summary": V.summarize(events) if events else [], "n_events": len(events)}
+        order = [lp.name for lp in lead_points(settings)]
+        out[venue] = {"summary": V.summarize(events, order=order) if events else [],
+                      "n_events": len(events)}
     return out
 
 

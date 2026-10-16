@@ -152,10 +152,12 @@ def mean(xs: list[float]) -> float:
     return sum(xs) / len(xs)
 
 
-def summarize(events: list[dict], n_boot: int = 2000, seed: int = 0) -> list[dict]:
+def summarize(events: list[dict], n_boot: int = 2000, seed: int = 0,
+              order: list[str] | None = None) -> list[dict]:
     """Mean scores per lead point, with a paired event bootstrap on model - market.
 
     Negative differences mean the model scored better (lower is better for all three).
+    Rows follow `order` (lead point names) when given.
     """
     rng = random.Random(seed)
     by_lead = defaultdict(list)
@@ -178,6 +180,8 @@ def summarize(events: list[dict], n_boot: int = 2000, seed: int = 0) -> list[dic
             b = sorted(boots[k])
             row[f"{k}_diff_ci"] = [b[int(0.025 * (n_boot - 1))], b[int(0.975 * (n_boot - 1))]]
         out.append(row)
+    if order:
+        out.sort(key=lambda r: order.index(r["lead"]) if r["lead"] in order else len(order))
     return out
 
 

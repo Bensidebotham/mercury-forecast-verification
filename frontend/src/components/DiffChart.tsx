@@ -19,7 +19,7 @@ const RIGHT = 24
 const TOP = 28
 
 /** Model − market score difference per venue and lead, with its 95% bootstrap interval. */
-export default function DiffChart({ rows }: { rows: Row[] }) {
+export default function DiffChart({ rows, windowLabel }: { rows: Row[]; windowLabel: string }) {
   const [metric, setMetric] = useState<Metric>('brier')
   const [hover, setHover] = useState<number | null>(null)
   if (!rows.length) return null
@@ -35,7 +35,7 @@ export default function DiffChart({ rows }: { rows: Row[] }) {
     <figure className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6 mb-8">
       <div className="flex flex-wrap items-start justify-between gap-3 mb-2">
         <figcaption>
-          <h2 className="text-base font-semibold text-[var(--color-text)]">Model minus market, test window</h2>
+          <h2 className="text-base font-semibold text-[var(--color-text)]">Model minus market, {windowLabel}</h2>
           <p className="text-xs text-[var(--color-muted)] mt-1 max-w-xl">
             Mean per-event score difference with a 95% paired bootstrap interval. Lower scores are better, so
             a point left of zero means the model was more accurate; right of zero, the market.

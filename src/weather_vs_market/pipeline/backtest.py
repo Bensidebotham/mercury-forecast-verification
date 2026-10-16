@@ -16,6 +16,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
+import httpx
 from sqlalchemy import Engine
 
 from weather_vs_market.analysis import verification as V
@@ -114,7 +115,7 @@ def _flush(engine: Engine, markets: list[dict], outcomes: list, quotes: list[dic
 
 
 def collect_kalshi(settings: Settings, engine: Engine, start: str, end: str,
-                   only: str | None = None, workers: int = 8, refresh: bool = False) -> dict:
+                   only: str | None = None, workers: int = 6, refresh: bool = False) -> dict:
     """`refresh` drops this window's existing quotes first, so a rule change is applied everywhere."""
     lps, tol = lead_points(settings), TOLERANCE_S
     source = SOURCES["kalshi"]
@@ -143,8 +144,13 @@ def collect_kalshi(settings: Settings, engine: Engine, start: str, end: str,
             raw, u, _, point_ts = item
             if u["market_uid"] in done:
                 return []
-            candles = kh.fetch_hourly_quotes(series, raw["ticker"], int(min(point_ts) - tol - 3600),
-                                             int(max(point_ts) + 3600), kh.is_historical(raw, cutoff))
+            try:
+                candles = kh.fetch_hourly_quotes(series, raw["ticker"], int(min(point_ts) - tol - 3600),
+                                                 int(max(point_ts) + 3600), kh.is_historical(raw, cutoff))
+            except httpx.HTTPError as e:
+                # Skipped markets have no quote yet; a later run without --refresh fills them in.
+                log.warning("kalshi %s candles failed: %s", raw["ticker"], e)
+                return []
             quotes = [kalshi_lead_quote(u["market_uid"], candles, pts, tol, source) for pts in point_ts]
             return [q for q in quotes if q]
 
@@ -203,8 +209,12 @@ def collect_polymarket(settings: Settings, engine: Engine, start: str, end: str,
                 outcomes.append((uid, r["outcome"]))
                 if uid in done:
                     continue
-                history = ph.fetch_price_history(r["token_id"], int(min(point_ts) - tol - 3600),
-                                                 int(max(point_ts) + 3600))
+                try:
+                    history = ph.fetch_price_history(r["token_id"], int(min(point_ts) - tol - 3600),
+                                                     int(max(point_ts) + 3600))
+                except httpx.HTTPError as e:
+                    log.warning("polymarket %s history failed: %s", r["token_id"], e)
+                    continue
                 hits = [polymarket_lead_quote(uid, [(float(t), p) for t, p in history], pts, tol, source)
                         for pts in point_ts]
                 quotes += [q for q in hits if q]

@@ -28,9 +28,9 @@ from weather_vs_market import http
 
 BASE = "https://api.elections.kalshi.com/trade-api/v2"
 MAX_CANDLES = 5000
-MAX_TRIES = 5
+MAX_TRIES = 8
 BACKOFF_S = 1.0
-MIN_INTERVAL_S = 0.2  # ~5 req/s, under the observed ~7 req/s limit
+MIN_INTERVAL_S = 0.25  # 4 req/s shared by all threads; ~7 req/s sustained draws 429s
 
 _PACER = http.Pacer(MIN_INTERVAL_S)
 

@@ -75,6 +75,15 @@ def _sort_key(m: dict) -> float:
     return m["bucket_lo"] if m["bucket_lo"] is not None else -math.inf
 
 
+def complete_ladder(ladder: list[dict]) -> bool:
+    """Sorted buckets run from open-low to open-high with no gaps or overlaps (integer °F)."""
+    if ladder[0]["bucket_lo"] is not None or ladder[-1]["bucket_hi"] is not None:
+        return False
+    return all(nxt["bucket_lo"] is not None and prev["bucket_hi"] is not None
+               and nxt["bucket_lo"] == prev["bucket_hi"] + 1
+               for prev, nxt in zip(ladder, ladder[1:], strict=False))
+
+
 def event_frame(engine: Engine, *, venue: str, model: str, lead_points: list[LeadPoint],
                 tz_for_city: dict[str, str], quote_sources: tuple[str, ...] | None = None,
                 tolerance_s: float = 2 * 3600, date_range: tuple[str, str] | None = None,
@@ -110,6 +119,9 @@ def event_frame(engine: Engine, *, venue: str, model: str, lead_points: list[Lea
             continue
         stats["events_in_window"] = stats.get("events_in_window", 0) + 1
         ladder.sort(key=_sort_key)
+        if not complete_ladder(ladder):
+            drop("incomplete_ladder")
+            continue
         outcomes = [int(m["outcome"]) for m in ladder]
         if sum(outcomes) != 1:
             drop("not_exactly_one_winner")
@@ -159,12 +171,14 @@ def summarize(events: list[dict], n_boot: int = 2000, seed: int = 0,
     Negative differences mean the model scored better (lower is better for all three).
     Rows follow `order` (lead point names) when given.
     """
-    rng = random.Random(seed)
     by_lead = defaultdict(list)
     for e in events:
         by_lead[e["lead"]].append(e)
     out = []
-    for lead, rows in by_lead.items():
+    for lead, rows in sorted(by_lead.items()):
+        # Sorted rows and a per-lead seed make the interval independent of read order.
+        rows = sorted(rows, key=lambda r: r.get("event_key", ""))
+        rng = random.Random(f"{seed}:{lead}")
         n = len(rows)
         row = {"lead": lead, "n_events": n}
         diffs = {k: [r[f"model_{k}"] - r[f"market_{k}"] for r in rows] for k in _METRICS}

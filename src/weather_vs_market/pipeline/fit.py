@@ -23,17 +23,38 @@ LOCKED_FILE = ROOT / "config" / "locked_obs.params.json"
 MIN_LOCKED_SIGMA = 0.5   # °F
 
 
-def settlement_stations(settings: Settings) -> list[str]:
-    ids = {v.station for v in settings.venues.kalshi} | {v.station for v in settings.venues.polymarket}
-    return sorted(ids)
+# What each venue settles on: Kalshi on the NWS CLI daily high, Polymarket on the
+# station's METAR observations (Wunderground / NOAA timeseries). On 72 of 72 dev
+# days Polymarket's winning bucket held the METAR max; the CLI high, 50 of 72.
+VENUE_TRUTH = {"kalshi": "cli", "polymarket": "metar"}
+
+
+def settlement_stations(settings: Settings, venue: str | None = None) -> list[str]:
+    venues = [venue] if venue else list(VENUE_TRUTH)
+    return sorted({v.station for name in venues for v in getattr(settings.venues, name)})
+
+
+def metar_highs(station_id: str, start: str, end: str, tz: str) -> dict[str, int]:
+    """Daily max of routine + special METAR temps, rounded to whole °F as the venues report it."""
+    daily: dict[str, float] = {}
+    for ts, t in iem.fetch_hourly_temps(station_id, start, end, tz=tz):
+        daily[ts[:10]] = max(daily.get(ts[:10], t), t)
+    return {d: round(t) for d, t in daily.items()}
+
+
+def observed_highs(truth: str, station_id: str, start: str, end: str, tz: str) -> dict[str, int]:
+    if truth == "metar":
+        return metar_highs(station_id, start, end, tz)
+    highs: dict[str, int] = {}
+    for year in range(int(start[:4]), int(end[:4]) + 1):
+        highs.update(iem.fetch_cli_highs(station_id, year, tz=tz))
+    return highs
 
 
 def samples_for_station(settings: Settings, station_id: str, start: str, end: str,
-                        leads: tuple[int, ...]) -> list[D.Sample]:
+                        leads: tuple[int, ...], truth: str = "cli") -> list[D.Sample]:
     st = settings.station(station_id)
-    highs: dict[str, int] = {}
-    for year in range(int(start[:4]), int(end[:4]) + 1):
-        highs.update(iem.fetch_cli_highs(station_id, year, tz=st.tz))
+    highs = observed_highs(truth, station_id, start, end, st.tz)
     maxima = previous_runs.fetch_daily_max_by_lead(st.lat, st.lon, st.tz, start, end, leads=leads,
                                                    models=D.MODELS)
     by_day_lead: dict[tuple[str, int], dict[str, float]] = {}
@@ -51,20 +72,22 @@ def samples_for_station(settings: Settings, station_id: str, start: str, end: st
 
 def run_fit(settings: Settings) -> dict:
     leads = tuple(sorted({lp.previous_run_days for lp in settings.evaluation.lead_points}))
-    samples: list[D.Sample] = []
-    for station_id in settlement_stations(settings):
-        s = samples_for_station(settings, station_id, *TRAIN, leads=leads)
-        log.info("%s: %d training samples", station_id, len(s))
-        samples += s
-    params = D.fit(samples)
+    params = {}
+    for venue, truth in VENUE_TRUTH.items():
+        samples: list[D.Sample] = []
+        for station_id in settlement_stations(settings, venue):
+            s = samples_for_station(settings, station_id, *TRAIN, leads=leads, truth=truth)
+            log.info("%s %s: %d training samples", truth, station_id, len(s))
+            samples += s
+        params[truth] = D.params_to_json(D.fit(samples))
     doc = {"model": D.MODEL, "train_window": list(TRAIN), "fit_at": date.today().isoformat(),
-           "fit_ts": time.time(), "params": D.params_to_json(params)}
+           "fit_ts": time.time(), "truth_by_venue": VENUE_TRUTH, "params": params}
     PARAMS_FILE.write_text(json.dumps(doc, indent=2) + "\n")
     return doc
 
 
-def load_params() -> dict[tuple[str, int], D.Params]:
-    return D.params_from_json(json.loads(PARAMS_FILE.read_text())["params"])
+def load_params(truth: str) -> dict[tuple[str, int], D.Params]:
+    return D.params_from_json(json.loads(PARAMS_FILE.read_text())["params"][truth])
 
 
 # Locked-day calibration for the live ensemble model. Hourly METAR misses peaks

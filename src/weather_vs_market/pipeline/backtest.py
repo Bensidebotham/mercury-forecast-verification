@@ -26,7 +26,7 @@ from weather_vs_market.config import ROOT, Settings
 from weather_vs_market.forecast import iem, previous_runs
 from weather_vs_market.model import buckets as bm
 from weather_vs_market.model import det_gauss as D
-from weather_vs_market.pipeline.fit import TRAIN, load_params
+from weather_vs_market.pipeline.fit import TRAIN, VENUE_TRUTH, load_params
 from weather_vs_market.pipeline.ingest import target_date_from_ticker, validate_unified
 from weather_vs_market.pipeline.publish import lead_points
 from weather_vs_market.pipeline.settle import outcome_from_result
@@ -75,15 +75,30 @@ def _quoted_uids(engine: Engine, source: str, n_points: int) -> set[str]:
     return {uid for uid, n in counts.items() if n >= n_points}
 
 
-def _lead_quotes(uid: str, points: list[tuple[float, float]], point_ts: list[float],
-                 tolerance_s: float, source: str) -> list[dict]:
-    rows = []
-    for pts in point_ts:
-        hit = as_of(points, pts, tolerance_s)
-        if hit:
-            rows.append({"ts": hit[0], "market_uid": uid, "market_prob": hit[1],
-                         "best_bid": None, "best_ask": None, "source": source})
-    return rows
+def kalshi_lead_quote(uid: str, candles: list[dict], point_ts: float, tolerance_s: float,
+                      source: str) -> dict | None:
+    """The as-of candle's price. If that latest book is one-sided or too wide there is
+    no price; an older, tighter candle is never substituted."""
+    hit = as_of([(c["ts"], c) for c in candles], point_ts, tolerance_s)
+    if hit is None or (price := kalshi_price(hit[1])) is None:
+        return None
+    c = hit[1]
+    return {"ts": c["ts"], "market_uid": uid, "market_prob": price, "best_bid": c["yes_bid"],
+            "best_ask": c["yes_ask"], "source": source}
+
+
+# A CLOB history point may summarize the hour after its timestamp, so it only counts
+# as known from the end of that hour. Conservative by up to an hour; never early.
+POLYMARKET_LAG_S = 3600
+
+
+def polymarket_lead_quote(uid: str, history: list[tuple[float, float]], point_ts: float,
+                          tolerance_s: float, source: str) -> dict | None:
+    hit = as_of([(t + POLYMARKET_LAG_S, p) for t, p in history], point_ts, tolerance_s)
+    if hit is None:
+        return None
+    return {"ts": hit[0], "market_uid": uid, "market_prob": hit[1], "best_bid": None,
+            "best_ask": None, "source": source}
 
 
 FLUSH_EVERY = 200   # markets; keeps a long collection resumable mid-series
@@ -99,10 +114,11 @@ def _flush(engine: Engine, markets: list[dict], outcomes: list, quotes: list[dic
 
 
 def collect_kalshi(settings: Settings, engine: Engine, start: str, end: str,
-                   only: str | None = None, workers: int = 4) -> dict:
+                   only: str | None = None, workers: int = 8, refresh: bool = False) -> dict:
+    """`refresh` drops this window's existing quotes first, so a rule change is applied everywhere."""
     lps, tol = lead_points(settings), TOLERANCE_S
     source = SOURCES["kalshi"]
-    done = _quoted_uids(engine, source, len(lps))
+    done = set() if refresh else _quoted_uids(engine, source, len(lps))
     cutoff = kh.fetch_cutoff()
     counts = {"markets": 0, "quotes": 0}
     for vc in settings.venues.kalshi:
@@ -120,6 +136,8 @@ def collect_kalshi(settings: Settings, engine: Engine, start: str, end: str,
                 continue
             u["station"] = vc.station
             todo.append((raw, u, outcome, [lp.timestamp(d, tz) for lp in lps]))
+        if refresh:
+            store.delete_quotes(engine, source, [t[1]["market_uid"] for t in todo])
 
         def lead_quotes(item, series: str = vc.series) -> list[dict]:
             raw, u, _, point_ts = item
@@ -127,8 +145,8 @@ def collect_kalshi(settings: Settings, engine: Engine, start: str, end: str,
                 return []
             candles = kh.fetch_hourly_quotes(series, raw["ticker"], int(min(point_ts) - tol - 3600),
                                              int(max(point_ts) + 3600), kh.is_historical(raw, cutoff))
-            priced = [(c["ts"], p) for c in candles if (p := kalshi_price(c)) is not None]
-            return _lead_quotes(u["market_uid"], priced, point_ts, tol, source)
+            quotes = [kalshi_lead_quote(u["market_uid"], candles, pts, tol, source) for pts in point_ts]
+            return [q for q in quotes if q]
 
         n_quotes = 0
         with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -151,10 +169,10 @@ def _polymarket_bucket(row: dict) -> tuple[float | None, float | None] | None:
 
 
 def collect_polymarket(settings: Settings, engine: Engine, start: str, end: str,
-                       only: str | None = None) -> dict:
+                       only: str | None = None, refresh: bool = False) -> dict:
     lps, tol = lead_points(settings), TOLERANCE_S
     source = SOURCES["polymarket"]
-    done = _quoted_uids(engine, source, len(lps))
+    done = set() if refresh else _quoted_uids(engine, source, len(lps))
     counts = {"markets": 0, "quotes": 0, "station_mismatch_events": 0}
     for vc in settings.venues.polymarket:
         if only and vc.slug != only:
@@ -187,7 +205,11 @@ def collect_polymarket(settings: Settings, engine: Engine, start: str, end: str,
                     continue
                 history = ph.fetch_price_history(r["token_id"], int(min(point_ts) - tol - 3600),
                                                  int(max(point_ts) + 3600))
-                quotes += _lead_quotes(uid, [(float(t), p) for t, p in history], point_ts, tol, source)
+                hits = [polymarket_lead_quote(uid, [(float(t), p) for t, p in history], pts, tol, source)
+                        for pts in point_ts]
+                quotes += [q for q in hits if q]
+        if refresh:
+            store.delete_quotes(engine, source, [m["market_uid"] for m in markets])
         store.upsert_markets(engine, markets)
         store.settle_markets(engine, outcomes)
         store.insert_quotes(engine, quotes)
@@ -198,24 +220,32 @@ def collect_polymarket(settings: Settings, engine: Engine, start: str, end: str,
 
 
 def forecast(settings: Settings, engine: Engine, start: str, end: str) -> dict:
-    """det_gauss_v1 predictions at each lead point for every stored ladder in the window."""
-    params = load_params()
+    """det_gauss_v1 predictions at each lead point for every stored ladder in the window.
+
+    Each venue uses parameters fit against its own settlement truth. Existing
+    det_gauss_v1 predictions for these markets are replaced, so a re-run never
+    leaves stale probabilities behind.
+    """
     lps = settings.evaluation.lead_points
     leads = tuple(sorted({lp.previous_run_days for lp in lps}))
     v = store.vmarket
-    by_station: dict[str, list[dict]] = {}
+    groups: dict[tuple[str, str], list[dict]] = {}
     for m in store.read_markets(engine, v.c.target_date >= start, v.c.target_date <= end):
-        if m["station"]:
-            by_station.setdefault(m["station"], []).append(m)
+        if m["station"] and m["venue"] in VENUE_TRUTH:
+            groups.setdefault((m["venue"], m["station"]), []).append(m)
     counts = {"preds": 0, "skipped_no_forecast": 0, "skipped_no_params": 0}
-    for station_id, markets in sorted(by_station.items()):
+    maxima_cache: dict[str, dict] = {}
+    first = (date.fromisoformat(start) - timedelta(days=1)).isoformat()
+    for (venue, station_id), markets in sorted(groups.items()):
+        params = load_params(VENUE_TRUTH[venue])
         st = settings.station(station_id)
-        first = (date.fromisoformat(start) - timedelta(days=1)).isoformat()
-        maxima = previous_runs.fetch_daily_max_by_lead(st.lat, st.lon, st.tz, first, end,
-                                                       leads=leads, models=D.MODELS)
+        if station_id not in maxima_cache:
+            maxima_cache[station_id] = previous_runs.fetch_daily_max_by_lead(
+                st.lat, st.lon, st.tz, first, end, leads=leads, models=D.MODELS)
+        maxima = maxima_cache[station_id]
         ladders: dict[str, list[dict]] = {}
         for m in markets:
-            ladders.setdefault(m["market_uid"].split(":")[0] + "|" + m["event_key"], []).append(m)
+            ladders.setdefault(m["event_key"], []).append(m)
         preds = []
         for ladder in ladders.values():
             d = ladder[0]["target_date"]
@@ -236,9 +266,10 @@ def forecast(settings: Settings, engine: Engine, start: str, end: str) -> dict:
                     preds.append({"ts": ts, "market_uid": m["market_uid"], "model": D.MODEL,
                                   "model_prob": prob,
                                   "lead_hours": ((m["close_ts"] or ts) - ts) / 3600})
+        store.delete_preds(engine, D.MODEL, [m["market_uid"] for m in markets])
         store.insert_preds(engine, preds)
         counts["preds"] += len(preds)
-        log.info("%s: %d predictions", station_id, len(preds))
+        log.info("%s %s: %d predictions", venue, station_id, len(preds))
     return counts
 
 
@@ -277,6 +308,7 @@ def score(settings: Settings, engine: Engine, window: tuple[str, str], name: str
     doc = {"protocol": "v1", "model": D.MODEL, "window_name": name, "window": list(window),
            "train_window": list(TRAIN), "generated_ts": time.time(), "git_sha": _git_sha(),
            "params": json.loads((ROOT / "config" / "det_gauss_v1.params.json").read_text())["params"],
+           "truth_by_venue": VENUE_TRUTH,
            "venues": {}}
     for venue, source in SOURCES.items():
         stats: dict = {}

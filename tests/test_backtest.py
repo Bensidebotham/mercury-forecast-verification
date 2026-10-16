@@ -61,7 +61,7 @@ def stubbed(monkeypatch, tmp_path):
     monkeypatch.setattr(B.kh, "fetch_hourly_quotes", candles)
     monkeypatch.setattr(B.previous_runs, "fetch_daily_max_by_lead", lambda *a, **k: {
         ("2025-07-10", m, n): 84.0 for m in D.MODELS for n in (1, 2)})
-    monkeypatch.setattr(B, "load_params", lambda: {
+    monkeypatch.setattr(B, "load_params", lambda truth: {
         ("KNYC", 1): D.Params(1.5, 1.0, 100), ("KNYC", 2): D.Params(1.5, 1.5, 100)})
     return settings, S.connect(str(tmp_path / "v.sqlite3"))
 
@@ -84,3 +84,34 @@ def test_collect_forecast_score_end_to_end(stubbed, monkeypatch, tmp_path):
     assert {r["lead"] for r in summary} == {"D-1 12:00", "D 08:00"}
     assert all(r["n_events"] == 1 for r in summary)
     assert (tmp_path / "results" / "backtest_dev.json").exists()
+
+
+def test_kalshi_lead_quote_uses_latest_candle_even_if_it_has_no_price():
+    candles = [{"ts": 100.0, "yes_bid": 0.40, "yes_ask": 0.44},
+               {"ts": 200.0, "yes_bid": 0.10, "yes_ask": 0.60}]          # latest is too wide
+    assert B.kalshi_lead_quote("kalshi:A", candles, 300.0, 1000, "kalshi_candles") is None
+    q = B.kalshi_lead_quote("kalshi:A", candles[:1], 300.0, 1000, "kalshi_candles")
+    assert (q["ts"], q["market_prob"], q["best_bid"], q["best_ask"]) == (100.0, 0.42, 0.40, 0.44)
+
+
+def test_polymarket_points_count_only_from_the_end_of_their_hour():
+    history = [(1000.0, 0.3), (4600.0, 0.7)]
+    # at 5000 the 4600 point (usable from 8200) is not yet safe; the 1000 point (usable from 4600) is
+    q = B.polymarket_lead_quote("polymarket:A", history, 5000.0, 10_000, "polymarket_history")
+    assert (q["ts"], q["market_prob"]) == (4600.0, 0.3)
+
+
+def test_forecast_uses_metar_truth_params_for_polymarket(monkeypatch, tmp_path):
+    from conftest import market
+    settings = load_settings()
+    engine = S.connect(str(tmp_path / "v.sqlite3"))
+    S.upsert_markets(engine, [market("polymarket:T", venue="polymarket", event_key="EVP",
+                                     station="KLGA", target_date="2025-07-10", bucket_lo=None,
+                                     bucket_hi=None, close_ts=2e9)])
+    monkeypatch.setattr(B.previous_runs, "fetch_daily_max_by_lead", lambda *a, **k: {
+        ("2025-07-10", m, n): 84.0 for m in D.MODELS for n in (1, 2)})
+    used = []
+    monkeypatch.setattr(B, "load_params", lambda truth: used.append(truth) or {
+        ("KLGA", 1): D.Params(0, 1, 100), ("KLGA", 2): D.Params(0, 1, 100)})
+    B.forecast(settings, engine, "2025-07-01", "2025-07-31")
+    assert set(used) == {"metar"}

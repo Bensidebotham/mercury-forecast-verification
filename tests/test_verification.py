@@ -137,3 +137,30 @@ def test_summary_rows_follow_lead_order():
             "model_logscore": 1.0, "market_logscore": 1.0}
     events = [{**base, "lead": "B"}, {**base, "lead": "A"}]
     assert [r["lead"] for r in V.summarize(events, n_boot=10, order=["A", "B"])] == ["A", "B"]
+
+
+def test_ladder_with_a_gap_is_dropped_as_incomplete(engine):
+    # buckets <=74 and >=77 only: 75-76 is missing, so the ladder doesn't cover every outcome
+    for i, (lo, hi, won) in enumerate([(None, 74.0, 0), (77.0, None, 1)]):
+        uid = f"kalshi:GAP-{i}"
+        S.upsert_markets(engine, [market(uid, event_key="GAP", bucket_lo=lo, bucket_hi=hi)])
+        S.insert_quotes(engine, [{"ts": POINT_TS - 60, "market_uid": uid, "market_prob": 0.5,
+                                  "best_bid": None, "best_ask": None, "source": "live"}])
+        S.insert_preds(engine, [{"ts": POINT_TS - 60, "market_uid": uid, "model": "m1",
+                                 "model_prob": 0.5, "lead_hours": 0.0}])
+        S.settle_markets(engine, [(uid, won)])
+    stats = {}
+    assert V.event_frame(engine, venue="kalshi", model="m1", lead_points=[LEAD],
+                         tz_for_city={"New York": "America/New_York"}, stats=stats) == []
+    assert stats["incomplete_ladder"] == 1
+
+
+def test_bootstrap_does_not_depend_on_row_order():
+    import random
+    base = {"lead": "L", "model_rps": 0.1, "market_rps": 0.1, "model_logscore": 1.0,
+            "market_logscore": 1.0}
+    events = [{**base, "event_key": f"E{i}", "model_brier": 0.1 * (i % 7), "market_brier": 0.3}
+              for i in range(40)]
+    shuffled = events[:]
+    random.Random(5).shuffle(shuffled)
+    assert V.summarize(events, n_boot=300) == V.summarize(shuffled, n_boot=300)

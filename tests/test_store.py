@@ -88,3 +88,24 @@ def test_count_and_latest_by_market(engine):
     latest = S.latest_by_market(engine, S.vpred, "model_prob", ["kalshi:A", "kalshi:B"],
                                 S.vpred.c.model == "m1")
     assert latest == {"kalshi:A": (2.0, 0.2), "kalshi:B": (1.0, 0.5)}
+
+
+def test_upsert_refreshes_bucket_bounds(engine):
+    S.upsert_markets(engine, [market(bucket_lo=75.0, bucket_hi=76.0)])
+    S.upsert_markets(engine, [market(bucket_lo=74.0, bucket_hi=75.0)])
+    m = S.read_markets(engine)[0]
+    assert (m["bucket_lo"], m["bucket_hi"]) == (74.0, 75.0)
+
+
+def test_delete_snapshots_for_markets(engine):
+    S.upsert_markets(engine, [market("kalshi:A"), market("kalshi:B")])
+    q = {"ts": 1.0, "market_prob": 0.5, "best_bid": None, "best_ask": None, "source": "s1"}
+    S.insert_quotes(engine, [{**q, "market_uid": "kalshi:A"}, {**q, "market_uid": "kalshi:B"},
+                             {**q, "market_uid": "kalshi:A", "source": "s2"}])
+    S.delete_quotes(engine, "s1", ["kalshi:A"])
+    assert sorted((r["market_uid"], r["source"]) for r in S.read_quotes(engine)) == [
+        ("kalshi:A", "s2"), ("kalshi:B", "s1")]
+    S.insert_preds(engine, [{"ts": 1.0, "market_uid": "kalshi:A", "model": "m1", "model_prob": 0.5,
+                             "lead_hours": 1.0}])
+    S.delete_preds(engine, "m1", ["kalshi:A"])
+    assert S.read_preds(engine) == []

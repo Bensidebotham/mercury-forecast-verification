@@ -115,7 +115,9 @@ def _insert(engine: Engine, table: Table):
     return (pg_insert if engine.dialect.name == "postgresql" else sqlite_insert)(table)
 
 
-_MARKET_UPDATABLE = ("event_key", "station", "question", "close_ts")
+# Everything but identity and settlement is refreshed, so a parser fix reaches stored rows.
+_MARKET_UPDATABLE = ("venue", "external_id", "event_key", "city", "station", "target_date",
+                     "bucket_lo", "bucket_hi", "unit", "question", "close_ts")
 
 
 def upsert_markets(engine: Engine, rows: list[dict]) -> None:
@@ -147,6 +149,20 @@ def insert_quotes(engine: Engine, rows: list[dict]) -> None:
 
 def insert_preds(engine: Engine, rows: list[dict]) -> None:
     _insert_ignore(engine, vpred, rows)
+
+
+def delete_quotes(engine: Engine, source: str, market_uids: list[str]) -> None:
+    """Drop one source's quotes for these markets (used to rebuild a backtest cleanly)."""
+    if market_uids:
+        with engine.begin() as c:
+            c.execute(delete(vquote).where(vquote.c.source == source,
+                                           vquote.c.market_uid.in_(market_uids)))
+
+
+def delete_preds(engine: Engine, model: str, market_uids: list[str]) -> None:
+    if market_uids:
+        with engine.begin() as c:
+            c.execute(delete(vpred).where(vpred.c.model == model, vpred.c.market_uid.in_(market_uids)))
 
 
 def settle_markets(engine: Engine, outcomes: list[tuple[str, int]]) -> None:

@@ -20,7 +20,7 @@ probability for each temperature bucket more accurate than the market's?
 | Polymarket ladders and results | Gamma `/events?slug=` | NYC (KLGA), Chicago (KORD), Miami (KMIA), LA (KLAX), SF (KSFO) |
 | Polymarket prices | CLOB `/prices-history`, hourly | a trade/mid price, not a bid/ask |
 | Forecasts | Open-Meteo Previous Runs API | `gfs_seamless` and `ecmwf_ifs025`, `temperature_2m_previous_dayN` |
-| Training truth | NWS CLI daily high via IEM | per settlement station |
+| Training truth | Kalshi: NWS CLI daily high; Polymarket: daily max of METAR observations (routine + special, rounded to °F), both via IEM | each venue's own settlement basis |
 | Scoring truth | each venue's own recorded result | not re-derived |
 
 Kalshi's settlement source changed from the NWS CLI to The Weather Company
@@ -61,7 +61,8 @@ most early-morning New York and Miami ladders (14 of 87 scored at D 08:00).
 `high ~ Normal(mean(GFS, ECMWF) + bias[station, N], sigma[station, N])`, where the
 forecast for each model is the max of its 24 hourly `previous_dayN` values for the
 local day, both models must be present, and bias/sigma are the mean and standard
-deviation of (CLI high − forecast) over the training window (minimum 60 days;
+deviation of (observed high − forecast) over the training window, with the observed
+high on each venue's settlement basis (see Data) (minimum 60 days;
 sigma floored at 0.75 °F). Bucket probability integrates the Normal over the
 bucket's reported-integer range (±0.5 °F).
 
@@ -69,16 +70,20 @@ The live `ens_kernel_v1` ensemble model has no archive and is scored forward onl
 
 ## Market probability
 
-- **Kalshi:** mid of the hourly candle's closing YES bid and ask. A bucket with a
-  missing side or a spread wider than $0.25 has no price.
-- **Polymarket:** the last price point at or before the lead time.
+- **Kalshi:** the latest hourly candle at or before the lead time, then the mid of its
+  closing YES bid and ask. If that candle has a missing side or a spread wider than
+  $0.25, the bucket has no price; an older candle is never substituted. A side quoted
+  at $0.00 (no bids) or $1.00 (no asks) counts as that price.
+- **Polymarket:** the last CLOB price point whose hour has fully elapsed by the lead
+  time (a point stamped t counts from t + 1 h).
 - Prices across an event's ladder are divided by their sum (removes the overround).
 
 ## Inclusion
 
-An event (city, date, venue) is scored at a lead point only if every bucket has a
-model and a market probability, exactly one bucket resolved YES, and both forecast
-models are present. Events dropped for each reason are counted and reported.
+An event (city, date, venue) is scored at a lead point only if its buckets run from
+an open-low to an open-high bucket with no gaps, every bucket has a model and a
+market probability, exactly one bucket resolved YES, and both forecast models are
+present. Events dropped for each reason are counted and reported.
 
 ## Scores
 
@@ -90,5 +95,29 @@ Per event, lower is better for all three:
 
 Results are reported per venue and lead point as means, with the model − market
 difference and a 95% paired bootstrap interval that resamples events
-(2,000 resamples, seed 0). Calibration is shown on bucket-level probabilities.
+(2,000 resamples; events sorted by key and seeded per lead point, so the interval
+does not depend on database row order). Calibration is shown on bucket-level probabilities.
 No per-city or per-month result is used to pick a headline.
+
+## Amendments before test scoring (2026-10-16)
+
+An independent review of the code against this protocol, and checks on the dev
+slice (training data only), led to these changes. All were made before any
+test-window score was computed, and the model was refit afterwards on the
+training window only.
+
+1. **Polymarket training truth.** Polymarket settles on station METAR observations,
+   not the CLI report. On the dev slice, the METAR max fell in Polymarket's winning
+   bucket on 72 of 72 days and the CLI high on 50 of 72. Fitting Polymarket's model
+   to CLI highs would have biased it warm by the CLI-vs-METAR gap.
+2. **Kalshi price rule order.** The draft code filtered out wide-spread candles and
+   then took the latest remaining one, which could reach back to an older, staler
+   price. The rule is now as-of first, then the price test.
+3. **Polymarket timestamps.** A history point is treated as known only from the end
+   of its hour, which can only make the market's price older, never newer.
+4. **Ladder completeness.** Events whose stored buckets do not cover every outcome are
+   dropped and counted, instead of being scored on a renormalized partial ladder.
+5. **Deterministic intervals.** See Scores.
+
+Results are written to `results/backtest_test.json` and rendered by
+`wvm backtest report`.

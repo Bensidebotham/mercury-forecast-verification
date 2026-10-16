@@ -88,11 +88,12 @@ def _window(name: str) -> tuple[str, str]:
 @backtest_app.command("collect")
 def backtest_collect(venue: str = typer.Argument(..., help="kalshi | polymarket"),
                      window: str = typer.Option("test", help="train | dev | test"),
-                     only: str = typer.Option("", help="One Kalshi series or Polymarket city slug.")):
+                     only: str = typer.Option("", help="One Kalshi series or Polymarket city slug."),
+                     refresh: bool = typer.Option(False, help="Re-fetch and replace this window's quotes.")):
     """Settled ladders, results and lead-point prices for a window."""
     from weather_vs_market.pipeline import backtest as B
     fn = {"kalshi": B.collect_kalshi, "polymarket": B.collect_polymarket}[venue]
-    rprint(fn(load_settings(), _engine(), *_window(window), only=only or None))
+    rprint(fn(load_settings(), _engine(), *_window(window), only=only or None, refresh=refresh))
 
 
 @backtest_app.command("forecast")
@@ -103,7 +104,7 @@ def backtest_forecast(window: str = typer.Option("test", help="train | dev | tes
 
 
 @backtest_app.command("score")
-def backtest_score(window: str = typer.Option("test", help="dev | test")):
+def backtest_score(window: str = typer.Option(..., help="dev | test; required, the test is scored once")):
     """Score a window per the protocol and write results/backtest_<window>.json."""
     from weather_vs_market.pipeline.backtest import score
     doc = score(load_settings(), _engine(), _window(window), window)

@@ -45,8 +45,16 @@ Scores are taken at fixed local clock times in the settlement station's time zon
 | D-1 12:00 | `previous_day2` | `previous_dayN` for hour h comes from a run issued at least 24·N h before h. The day-D max includes hour 23:00, so the latest run used was issued around D-2 23:00 local and published (GFS ~4 h, ECMWF ~6 h later) by about D-1 05:00 local, seven hours before the lead point. |
 | D 08:00 | `previous_day1` | latest run issued around D-1 23:00 local, published by about D 05:00 local, three hours before the lead point. |
 
-A market price is the latest snapshot **at or before** the lead time and no more
-than 2 hours older. Nothing after the lead time is ever used.
+A market price is the latest snapshot **at or before** the lead time. Nothing
+after the lead time is ever used. Backtest prices may be up to 12 hours older
+than the lead time; live snapshots, taken hourly, up to 2 hours.
+
+*Amended 2026-10-16, before any test-window scoring:* the first draft used a
+2-hour limit everywhere. Debugging on the dev slice showed that Kalshi emits a
+candle only for hours with activity, while the order book persists in between:
+a market quoted 0.33/0.46 at 04:00 ET had no candle until 08:00. A standing quote
+is still the price at the lead time, and the 2-hour limit was silently dropping
+most early-morning New York and Miami ladders (14 of 87 scored at D 08:00).
 
 ## Model: det_gauss_v1
 

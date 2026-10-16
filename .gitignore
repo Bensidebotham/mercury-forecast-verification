@@ -7,3 +7,4 @@ data/
 .DS_Store
 .vercel
 .claude/worktrees/
+results/backtest_dev.json

@@ -36,6 +36,9 @@ log = logging.getLogger("wvm.backtest")
 TEST = ("2025-07-01", "2026-09-30")
 SOURCES = {"kalshi": "kalshi_candles", "polymarket": "polymarket_history"}
 MAX_SPREAD = 0.25
+# Kalshi emits a candle only for hours with activity; the book persists between
+# them, so a standing quote can be hours old and still be the lead-time price.
+TOLERANCE_S = 12 * 3600
 RESULTS_DIR = ROOT / "results"
 
 
@@ -63,8 +66,12 @@ def _in(d: str | None, start: str, end: str) -> bool:
     return d is not None and start <= d <= end
 
 
-def _quoted_uids(engine: Engine, source: str) -> set[str]:
-    return {q["market_uid"] for q in store.read_quotes(engine, store.vquote.c.source == source)}
+def _quoted_uids(engine: Engine, source: str, n_points: int) -> set[str]:
+    """Markets that already have a backtest quote for every lead point."""
+    counts: dict[str, int] = {}
+    for q in store.read_quotes(engine, store.vquote.c.source == source):
+        counts[q["market_uid"]] = counts.get(q["market_uid"], 0) + 1
+    return {uid for uid, n in counts.items() if n >= n_points}
 
 
 def _lead_quotes(uid: str, points: list[tuple[float, float]], point_ts: list[float],
@@ -79,9 +86,9 @@ def _lead_quotes(uid: str, points: list[tuple[float, float]], point_ts: list[flo
 
 
 def collect_kalshi(settings: Settings, engine: Engine, start: str, end: str) -> dict:
-    lps, tol = lead_points(settings), settings.evaluation.tolerance_hours * 3600
+    lps, tol = lead_points(settings), TOLERANCE_S
     source = SOURCES["kalshi"]
-    done = _quoted_uids(engine, source)
+    done = _quoted_uids(engine, source, len(lps))
     cutoff = kh.fetch_cutoff()
     counts = {"markets": 0, "quotes": 0}
     for vc in settings.venues.kalshi:
@@ -122,9 +129,9 @@ def _polymarket_bucket(row: dict) -> tuple[float | None, float | None] | None:
 
 
 def collect_polymarket(settings: Settings, engine: Engine, start: str, end: str) -> dict:
-    lps, tol = lead_points(settings), settings.evaluation.tolerance_hours * 3600
+    lps, tol = lead_points(settings), TOLERANCE_S
     source = SOURCES["polymarket"]
-    done = _quoted_uids(engine, source)
+    done = _quoted_uids(engine, source, len(lps))
     counts = {"markets": 0, "quotes": 0, "station_mismatch_events": 0}
     for vc in settings.venues.polymarket:
         tz = settings.station(vc.station).tz
@@ -250,8 +257,7 @@ def score(settings: Settings, engine: Engine, window: tuple[str, str], name: str
         stats: dict = {}
         events = V.event_frame(engine, venue=venue, model=D.MODEL, lead_points=lps,
                                tz_for_city=settings.city_timezones(venue), quote_sources=(source,),
-                               tolerance_s=settings.evaluation.tolerance_hours * 3600,
-                               date_range=window, stats=stats)
+                               tolerance_s=TOLERANCE_S, date_range=window, stats=stats)
         calibration, by_city = {}, []
         for lp in lps:
             rows = [e for e in events if e["lead"] == lp.name]

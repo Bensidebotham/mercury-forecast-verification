@@ -77,8 +77,19 @@ def _sort_key(m: dict) -> float:
 
 def event_frame(engine: Engine, *, venue: str, model: str, lead_points: list[LeadPoint],
                 tz_for_city: dict[str, str], quote_sources: tuple[str, ...] | None = None,
-                tolerance_s: float = 2 * 3600) -> list[dict]:
-    """One scored row per (event, lead point) with a complete, settled ladder."""
+                tolerance_s: float = 2 * 3600, date_range: tuple[str, str] | None = None,
+                stats: dict | None = None) -> list[dict]:
+    """One scored row per (event, lead point) with a complete, settled ladder.
+
+    `date_range` keeps target dates within [start, end] (ISO, inclusive).
+    `stats`, if given, counts events in the window, and (event, lead point) pairs
+    scored or dropped by reason.
+    """
+    stats = stats if stats is not None else {}
+
+    def drop(reason: str) -> None:
+        stats[reason] = stats.get(reason, 0) + 1
+
     markets = [m for m in store.read_markets(engine, store.vmarket.c.venue == venue)
                if m["settled"]]
     quotes, preds = defaultdict(list), defaultdict(list)
@@ -94,21 +105,31 @@ def event_frame(engine: Engine, *, venue: str, model: str, lead_points: list[Lea
 
     frame = []
     for event_key, ladder in events.items():
+        first = ladder[0]
+        if date_range and not date_range[0] <= first["target_date"] <= date_range[1]:
+            continue
+        stats["events_in_window"] = stats.get("events_in_window", 0) + 1
         ladder.sort(key=_sort_key)
         outcomes = [int(m["outcome"]) for m in ladder]
         if sum(outcomes) != 1:
+            drop("not_exactly_one_winner")
             continue
         winner = outcomes.index(1)
-        first = ladder[0]
         tz = tz_for_city.get(first["city"])
         if tz is None:
+            drop("unknown_city")
             continue
         for lp in lead_points:
             point_ts = lp.timestamp(first["target_date"], tz)
             model_p = [_as_of(preds[m["market_uid"]], point_ts, tolerance_s) for m in ladder]
             market_p = [_as_of(quotes[m["market_uid"]], point_ts, tolerance_s) for m in ladder]
-            if None in model_p or None in market_p:
+            if None in model_p:
+                drop("missing_model")
                 continue
+            if None in market_p:
+                drop("missing_market")
+                continue
+            stats["scored"] = stats.get("scored", 0) + 1
             model_p, market_p = _normalize(model_p), _normalize(market_p)
             frame.append({
                 "venue": venue, "event_key": event_key, "city": first["city"],

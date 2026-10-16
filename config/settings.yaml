@@ -34,10 +34,11 @@ ensemble:
 
 # Fixed local clock times relative to the target date D. Kalshi ladders open
 # around 10:00 ET on D-1 and close at midnight ending D, so longer leads don't exist.
+# Each lead point fixes which Previous Runs offset the backtest may use: see docs/PROTOCOL.md.
 evaluation:
   lead_points:
-    - {name: "D-1 12:00", day_offset: -1, hour: 12}
-    - {name: "D 07:00", day_offset: 0, hour: 7}
+    - {name: "D-1 12:00", day_offset: -1, hour: 12, previous_run_days: 2}
+    - {name: "D 08:00", day_offset: 0, hour: 8, previous_run_days: 1}
   tolerance_hours: 2
 
 storage:

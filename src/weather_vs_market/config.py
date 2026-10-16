@@ -46,6 +46,7 @@ class LeadPointConfig(BaseModel):
     name: str
     day_offset: int
     hour: int
+    previous_run_days: int   # Open-Meteo previous_dayN offset the backtest may use here
 
 
 class EvaluationConfig(BaseModel):

@@ -116,3 +116,17 @@ def test_calibration_curve_buckets_and_winrate():
     curve = V.calibration_curve([(0.1, 0), (0.15, 0), (0.85, 1), (0.9, 1)], bins=2)
     assert curve[0]["n"] == 2 and curve[0]["win_rate"] == 0.0
     assert curve[-1]["n"] == 2 and curve[-1]["win_rate"] == 1.0
+
+
+def test_date_window_and_drop_reasons_are_reported(engine):
+    _event(engine, probs_model=[0.1, 0.8, 0.1], probs_market=[0.2, 0.6, 0.2], winner=1)
+    _event(engine, probs_model=[0.1, 0.8, 0.1], probs_market=[0.2, 0.6, 0.2], winner=1,
+           event="EV2", date="2026-07-22")
+    _event(engine, probs_model=[0.1, 0.8, 0.1], probs_market=[0.2, 0.6, 0.2], winner=1,
+           event="EV3", quote_ts=POINT_TS + 60)
+    stats = {}
+    frame = V.event_frame(engine, venue="kalshi", model="m1", lead_points=[LEAD],
+                          tz_for_city={"New York": "America/New_York"},
+                          date_range=("2026-06-01", "2026-06-30"), stats=stats)
+    assert [e["event_key"] for e in frame] == ["EV1"]
+    assert stats == {"events_in_window": 2, "scored": 1, "missing_market": 1}

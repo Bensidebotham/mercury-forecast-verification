@@ -10,13 +10,18 @@ dependencies = [
     "typer",
     "rich",
     "pyarrow",
+    "sqlalchemy>=2.1.4",
+    "psycopg[binary]>=3.3.6",
 ]
 
 [project.scripts]
 wvm = "weather_vs_market.cli:app"
 
 [dependency-groups]
-dev = ["pytest"]
+dev = [
+    "pytest",
+    "ruff>=0.17.1",
+]
 
 [build-system]
 requires = ["hatchling"]

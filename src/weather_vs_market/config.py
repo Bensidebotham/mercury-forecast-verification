@@ -1,5 +1,6 @@
 """Load config/settings.yaml into typed config objects."""
 
+import os
 from pathlib import Path
 
 import yaml
@@ -8,46 +9,78 @@ from pydantic import BaseModel
 ROOT = Path(__file__).resolve().parents[2]
 
 
-class City(BaseModel):
-    name: str
-    station: str
+class Station(BaseModel):
+    id: str
     lat: float
     lon: float
-    tz: str = "America/New_York"
-    unit: str = "F"
-    aliases: list[str] = []
+    tz: str
+    name: str = ""
 
 
-class ForecastConfig(BaseModel):
-    cities: list[City] = []
+class KalshiCity(BaseModel):
+    city: str
+    series: str
+    station: str
+
+
+class PolymarketCity(BaseModel):
+    city: str
+    slug: str          # city part of the event slug, e.g. "nyc"
+    station: str
+
+
+class Venues(BaseModel):
+    kalshi: list[KalshiCity] = []
+    polymarket: list[PolymarketCity] = []
+
+
+class EnsembleConfig(BaseModel):
     kernel_sigma_f: float = 1.5
     lock_hour_local: int = 18
-    # Hourly METAR maxima undershoot the official CLI daily max (CLI uses
-    # continuous sensor peaks). Buffer keeps truncation honest; bias centers
-    # locked-day estimates; locked sigma covers the residual uncertainty.
-    obs_buffer_f: float = 1.5
-    locked_bias_f: float = 0.75
-    locked_sigma_f: float = 1.0
-    # Coarse global ensembles (25km grid) run hot at coastal stations
-    # (KSFO/KLAX marine layer). Shift members this fraction of the way
-    # toward the NWS point forecast (2.5km, forecaster-edited).
-    nws_blend: float = 0.7
+    obs_buffer_f: float = 1.0
+    locked_bias_f: float = 0.0
+    locked_sigma_f: float = 0.75
 
 
-class VerifyConfig(BaseModel):
-    db_path: str = "data/verify.sqlite3"
-    lead_buckets: tuple[int, ...] = (72, 48, 24, 6)
-    kalshi_cities: list[str] = ["New York", "Los Angeles", "Chicago", "Miami", "Austin"]
-    include_polymarket: bool = True
+class LeadPointConfig(BaseModel):
+    name: str
+    day_offset: int
+    hour: int
+
+
+class EvaluationConfig(BaseModel):
+    lead_points: list[LeadPointConfig] = []
+    tolerance_hours: float = 2.0
+
+
+class StorageConfig(BaseModel):
+    url: str = "data/verify.sqlite3"
 
 
 class Settings(BaseModel):
-    forecast: ForecastConfig = ForecastConfig()
-    verify: VerifyConfig = VerifyConfig()
+    stations: dict[str, Station]
+    venues: Venues = Venues()
+    ensemble: EnsembleConfig = EnsembleConfig()
+    evaluation: EvaluationConfig = EvaluationConfig()
+    storage: StorageConfig = StorageConfig()
+
+    def station(self, station_id: str) -> Station:
+        return self.stations[station_id]
+
+    def city_timezones(self, venue: str) -> dict[str, str]:
+        return {v.city: self.station(v.station).tz for v in getattr(self.venues, venue)}
+
+    def database_url(self) -> str:
+        """DATABASE_URL wins; otherwise a SQLite path relative to the repo root."""
+        if url := os.environ.get("DATABASE_URL"):
+            return url
+        p = Path(self.storage.url)
+        return str(p if p.is_absolute() or "://" in self.storage.url else ROOT / p)
 
 
 def load_settings(path: Path | None = None) -> Settings:
     path = path or ROOT / "config" / "settings.yaml"
     with open(path) as f:
-        return Settings.model_validate(yaml.safe_load(f))
-
+        raw = yaml.safe_load(f)
+    raw["stations"] = {k: {"id": k, **v} for k, v in raw.get("stations", {}).items()}
+    return Settings.model_validate(raw)

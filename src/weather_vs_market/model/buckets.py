@@ -74,7 +74,9 @@ def bucket_probability(
     if locked and obs_max is not None:
         members, sigma, obs_max = [obs_max], locked_sigma, None
     if not members:
-        return 0.0
+        # No forecast to integrate (fetch failed or date beyond the horizon).
+        # Raise rather than return 0.0, which would read as a confident "no".
+        raise ValueError("no ensemble members and no locked observation")
 
     a = lo - 0.5 if lo is not None else -math.inf
     b = hi + 0.5 if hi is not None else math.inf
@@ -111,9 +113,3 @@ def ladder_probabilities(
     ]
     s = sum(probs)
     return [p / s for p in probs] if s > 0 else probs
-
-
-def bias_correction(station: str) -> float:
-    """Historical model-vs-observation bias. 0.0 until the calibration
-    loop has enough logged forecast/outcome pairs to estimate it."""
-    return 0.0

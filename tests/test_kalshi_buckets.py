@@ -1,5 +1,6 @@
 from weather_vs_market.model.kalshi_buckets import parse_kalshi_strike
 
+
 def test_inclusive_range():
     assert parse_kalshi_strike("75-76°") == (75.0, 76.0, "F")
 

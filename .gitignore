@@ -6,3 +6,4 @@ data/
 *.sqlite3
 .DS_Store
 .vercel
+.claude/worktrees/

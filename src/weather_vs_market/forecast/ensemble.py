@@ -1,15 +1,15 @@
-"""Ensemble members via open-meteo (free, no key) — the uncertainty signal.
+"""Ensemble members via open-meteo (free, no key): the live uncertainty signal.
 
-GFS (31 members) + ECMWF IFS (51 members) give us a distribution over
-the daily high, not just a point estimate. The edge mechanism is
-model-vs-stale-price: members shifting between buckets faster than
-thin books reprice.
+GFS (31 members) + ECMWF IFS (51 members) give a distribution over the
+daily high, not just a point estimate. Open-Meteo keeps no archive of past
+ensemble runs, so this model can only be scored forward, on live snapshots.
 """
 
 import httpx
 
+from weather_vs_market import USER_AGENT
+
 ENSEMBLE_BASE = "https://ensemble-api.open-meteo.com/v1/ensemble"
-UA = {"User-Agent": "weather-vs-market/0.2 (github.com/Bensidebotham/weather-vs-market; bensidebotham89@gmail.com)"}
 MODELS = "gfs025,ecmwf_ifs025"
 
 
@@ -31,7 +31,7 @@ def get_ensemble_members(
     if unit.upper() == "F":
         params["temperature_unit"] = "fahrenheit"
     try:
-        with httpx.Client(headers=UA, timeout=30) as client:
+        with httpx.Client(headers=USER_AGENT, timeout=30) as client:
             resp = client.get(ENSEMBLE_BASE, params=params)
             resp.raise_for_status()
             payloads = resp.json()

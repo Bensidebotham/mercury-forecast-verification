@@ -1,18 +1,15 @@
-"""Gamma API client — market discovery (read-only, no auth).
-
-Public international endpoints, used for paper-trading market data.
-When the Polymarket US API key is available, a clients/us.py with the
-same return shape replaces this for the live pilot.
+"""Gamma API client: live Polymarket market discovery (read-only, no auth).
 """
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
+from weather_vs_market import USER_AGENT
+
 GAMMA_BASE = "https://gamma-api.polymarket.com"
-UA = {"User-Agent": "weather-vs-market/0.2 (github.com/Bensidebotham/weather-vs-market)"}
 
 # "Highest temperature in NYC on June 10?"
 _EVENT_RE = re.compile(r"Highest temperature in (.+) on (\w+ \d+)\?")
@@ -54,7 +51,7 @@ def find_weather_markets(cities: list, limit: int = 50) -> list[dict]:
                   outcome_prices, end_ts, closed}
     Bucket bounds are parsed downstream by model.buckets.parse_bucket.
     """
-    with httpx.Client(headers=UA, timeout=20) as client:
+    with httpx.Client(headers=USER_AGENT, timeout=20) as client:
         resp = client.get(
             f"{GAMMA_BASE}/events",
             params={
@@ -68,7 +65,7 @@ def find_weather_markets(cities: list, limit: int = 50) -> list[dict]:
         resp.raise_for_status()
         events = resp.json()
 
-    year = datetime.now(timezone.utc).year
+    year = datetime.now(UTC).year
     alias_to_city = build_alias_map(cities)
 
     rows = []
@@ -111,7 +108,7 @@ def get_event_resolutions(slugs: list[str]) -> dict[str, int | None]:
     /markets?clob_token_ids lookup stops returning archived markets.
     """
     out: dict[str, int | None] = {}
-    with httpx.Client(headers=UA, timeout=20) as client:
+    with httpx.Client(headers=USER_AGENT, timeout=20) as client:
         for slug in set(slugs):
             try:
                 resp = client.get(f"{GAMMA_BASE}/events", params={"slug": slug})

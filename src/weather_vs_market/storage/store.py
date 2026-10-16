@@ -7,8 +7,19 @@ is a no-op, so a retried ingest run never double-counts.
 import json
 
 from sqlalchemy import (
-    Column, Engine, Float, Integer, MetaData, Table, Text, UniqueConstraint, create_engine,
-    delete, func, select, update,
+    Column,
+    Engine,
+    Float,
+    Integer,
+    MetaData,
+    Table,
+    Text,
+    UniqueConstraint,
+    create_engine,
+    delete,
+    func,
+    select,
+    update,
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -174,22 +185,44 @@ def count_published(engine: Engine) -> int:
         return c.execute(select(func.count()).select_from(published_result)).scalar_one()
 
 
-def _read(engine: Engine, table: Table, *where) -> list[dict]:
+def count(engine: Engine, table: Table, *where) -> int:
+    with engine.connect() as c:
+        return c.execute(select(func.count()).select_from(table).where(*where)).scalar_one()
+
+
+def latest_by_market(engine: Engine, table: Table, value_col: str, market_uids: list[str],
+                     *where) -> dict[str, tuple[float, float]]:
+    """{market_uid: (ts, value)} for the newest row per market."""
+    if not market_uids:
+        return {}
+    newest = (select(table.c.market_uid, func.max(table.c.ts).label("ts"))
+              .where(table.c.market_uid.in_(market_uids), *where)
+              .group_by(table.c.market_uid).subquery())
+    stmt = (select(table.c.market_uid, table.c.ts, table.c[value_col])
+            .join(newest, (table.c.market_uid == newest.c.market_uid) & (table.c.ts == newest.c.ts))
+            .where(*where))
+    with engine.connect() as c:
+        return {r[0]: (r[1], r[2]) for r in c.execute(stmt)}
+
+
+def read_table(engine: Engine, table: Table, *where) -> list[dict]:
     with engine.connect() as c:
         return [dict(r) for r in c.execute(select(table).where(*where)).mappings()]
 
 
 def read_markets(engine: Engine, *where) -> list[dict]:
-    return _read(engine, vmarket, *where)
+    return read_table(engine, vmarket, *where)
 
 
 def read_quotes(engine: Engine, *where) -> list[dict]:
-    return _read(engine, vquote, *where)
+    return read_table(engine, vquote, *where)
 
 
 def read_preds(engine: Engine, *where) -> list[dict]:
-    return _read(engine, vpred, *where)
+    return read_table(engine, vpred, *where)
 
 
-def read_runs(engine: Engine) -> list[dict]:
-    return _read(engine, ingest_run)
+def read_runs(engine: Engine, limit: int | None = None) -> list[dict]:
+    stmt = select(ingest_run).order_by(ingest_run.c.started_ts.desc()).limit(limit)
+    with engine.connect() as c:
+        return [dict(r) for r in c.execute(stmt).mappings()]

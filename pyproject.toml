@@ -1,6 +1,6 @@
 [project]
 name = "weather-vs-market"
-version = "0.2.0"
+version = "0.3.0"
 description = "Score weather-model probabilities against Kalshi and Polymarket temperature markets"
 requires-python = ">=3.12"
 dependencies = [
@@ -32,3 +32,13 @@ packages = ["src/weather_vs_market"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["weather_vs_market", "conftest"]

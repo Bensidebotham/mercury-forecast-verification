@@ -1,5 +1,7 @@
 import math
 
+import pytest
+
 from weather_vs_market.model.buckets import bucket_probability, ladder_probabilities, parse_bucket
 
 
@@ -60,3 +62,15 @@ def test_locked_day_collapses_to_obs():
     assert p > 0.9
     p_wrong = bucket_probability(members, 88, 89, sigma=1.5, obs_max=82.4, locked=True)
     assert p_wrong < 0.01
+
+
+def test_no_members_and_no_locked_obs_is_an_error_not_zero():
+    # A failed ensemble fetch must never turn into a confident P=0.0.
+    with pytest.raises(ValueError):
+        bucket_probability([], 82, 83)
+    with pytest.raises(ValueError):
+        bucket_probability([], 82, 83, obs_max=80.0, locked=False)
+
+
+def test_locked_day_needs_no_members():
+    assert bucket_probability([], 82, 83, obs_max=82.4, locked=True, locked_sigma=0.5) > 0.9

@@ -1,12 +1,15 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from weather_vs_market.clients.kalshi import market_prob_from_quote, market_to_unified
 
-def test_market_prob_is_mid_in_unit_interval():
-    assert market_prob_from_quote(yes_bid=40, yes_ask=44) == 0.42
 
-def test_market_prob_handles_one_sided_book():
-    assert market_prob_from_quote(yes_bid=None, yes_ask=44) == 0.44
-    assert market_prob_from_quote(yes_bid=40, yes_ask=None) == 0.40
+def test_market_prob_is_mid_of_dollar_quotes():
+    assert market_prob_from_quote(yes_bid=0.40, yes_ask=0.44) == 0.42
+
+def test_market_prob_none_for_one_sided_book():
+    # A lone bid or ask is not a price: an empty side means no one will trade there.
+    assert market_prob_from_quote(yes_bid=None, yes_ask=0.44) is None
+    assert market_prob_from_quote(yes_bid=0.40, yes_ask=None) is None
 
 def test_market_prob_none_when_no_book():
     assert market_prob_from_quote(None, None) is None
@@ -21,7 +24,7 @@ def test_market_to_unified_maps_fields():
     assert u["market_uid"] == "kalshi:KXHIGHNY-26JUN22-B75"
     assert u["venue"] == "kalshi"
     assert (u["bucket_lo"], u["bucket_hi"]) == (75.0, 76.0)
-    assert u["close_ts"] == datetime(2026, 6, 23, 4, 0, 0, tzinfo=timezone.utc).timestamp()
+    assert u["close_ts"] == datetime(2026, 6, 23, 4, 0, 0, tzinfo=UTC).timestamp()
 
 def test_market_to_unified_none_for_unparseable_subtitle():
     raw = {"ticker": "X", "title": "t", "subtitle": "cloudy", "close_time": "2026-06-23T04:00:00Z"}
@@ -31,7 +34,8 @@ def test_market_to_unified_none_for_unparseable_subtitle():
 # `yes_sub_title`, and the bucket is given structurally by floor/cap strike.
 def _current_raw(**over):
     raw = {
-        "ticker": "KXHIGHNY-26OCT10-B72.5", "title": "Will the maximum temperature be 72-73° on Oct 10, 2026?",
+        "ticker": "KXHIGHNY-26OCT10-B72.5",
+        "title": "Will the maximum temperature be 72-73° on Oct 10, 2026?",
         "subtitle": None, "yes_sub_title": "72° to 73°", "close_time": "2026-10-11T05:00:00Z",
         "yes_bid": None, "yes_ask": None, "yes_bid_dollars": "0.0200", "yes_ask_dollars": "0.0300",
         "floor_strike": 72, "cap_strike": 73, "strike_type": "between", "status": "active",
@@ -62,7 +66,26 @@ def test_label_fallback_reads_yes_sub_title_when_no_strikes():
     u = market_to_unified(raw, city="New York", target_date="2026-10-10")
     assert (u["bucket_lo"], u["bucket_hi"]) == (72.0, 73.0)
 
-def test_null_cent_prices_fall_back_to_dollar_strings():
+def test_quotes_are_normalized_to_dollars():
     from weather_vs_market.clients.kalshi import _normalize_market
     m = _normalize_market(_current_raw())
-    assert (m["yes_bid"], m["yes_ask"]) == (2, 3)
+    assert (m["yes_bid"], m["yes_ask"]) == (0.02, 0.03)
+    # legacy integer-cent payloads are converted too
+    legacy = _normalize_market({"yes_bid": 40, "yes_ask": 44})
+    assert (legacy["yes_bid"], legacy["yes_ask"]) == (0.40, 0.44)
+
+def test_market_to_unified_carries_event_ticker():
+    u = market_to_unified(_current_raw(event_ticker="KXHIGHNY-26OCT10"), city="New York",
+                          target_date="2026-10-10")
+    assert u["event_key"] == "KXHIGHNY-26OCT10"
+
+def test_fetch_markets_follows_cursor():
+    import httpx
+
+    from weather_vs_market.clients.kalshi import fetch_markets
+    pages = {"": {"markets": [{"ticker": "A"}], "cursor": "c1"},
+             "c1": {"markets": [{"ticker": "B"}], "cursor": ""}}
+    transport = httpx.MockTransport(
+        lambda req: httpx.Response(200, json=pages[req.url.params.get("cursor", "")]))
+    with httpx.Client(transport=transport) as client:
+        assert [m["ticker"] for m in fetch_markets("KXHIGHNY", client=client)] == ["A", "B"]

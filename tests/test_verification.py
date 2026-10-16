@@ -1,51 +1,118 @@
 import math
+
 import pytest
+
+from conftest import market
 from weather_vs_market.analysis import verification as V
-from weather_vs_market.storage import verify_db
+from weather_vs_market.storage import store as S
+
+LEAD = V.LeadPoint("D-1 12:00", day_offset=-1, hour=12)
+# 2026-06-21 12:00 America/New_York = 16:00 UTC
+POINT_TS = 1782057600.0
 
 
-def test_snapshot_window_excludes_far_snapshots(tmp_path):
-    from weather_vs_market.analysis import verification as V
-    from weather_vs_market.storage import verify_db
-    conn = verify_db.connect(str(tmp_path / "v.sqlite3"))
-    uid = "kalshi:T2"
-    verify_db.upsert_market(conn, {"market_uid": uid, "venue": "kalshi", "external_id": "T2",
-        "city": "NYC", "target_date": "2026-06-22", "bucket_lo": 75.0, "bucket_hi": 76.0,
-        "unit": "F", "question": "q", "close_ts": 1_000_000.0})
-    # one snapshot ~30h before close
-    ts = 1_000_000.0 - 30*3600
-    verify_db.insert_quote(conn, uid, ts, 0.5, 0.48, 0.52)
-    verify_db.insert_pred(conn, uid, ts, 0.8, 30.0)
-    verify_db.settle_market(conn, uid, 1)
-    # with a 12h window: the 30h snapshot matches ONLY the 24h bucket (|30-24|=6h<=12),
-    # not 72/48/6. So evaluation_frame over (72,48,24,6) yields exactly 1 row at lead 24.
-    frame = V.evaluation_frame(conn, lead_buckets=(72, 48, 24, 6))
+def test_lead_point_timestamp_is_local_clock_time():
+    assert LEAD.timestamp("2026-06-22", "America/New_York") == POINT_TS
+
+
+def _event(engine, *, probs_model, probs_market, winner, event="EV1", city="New York",
+           date="2026-06-22", quote_ts=POINT_TS - 600, pred_ts=POINT_TS - 600, model="m1"):
+    """Seed a 3-bucket ladder (<=74, 75-76, >=77) for one city-day."""
+    ladder = [(None, 74.0), (75.0, 76.0), (77.0, None)]
+    rows, quotes, preds, outcomes = [], [], [], []
+    for i, (lo, hi) in enumerate(ladder):
+        uid = f"kalshi:{event}-{i}"
+        rows.append(market(uid, event_key=event, city=city, target_date=date,
+                           bucket_lo=lo, bucket_hi=hi))
+        quotes.append({"ts": quote_ts, "market_uid": uid, "market_prob": probs_market[i],
+                       "best_bid": None, "best_ask": None, "source": "live"})
+        preds.append({"ts": pred_ts, "market_uid": uid, "model": model,
+                      "model_prob": probs_model[i], "lead_hours": 0.0})
+        outcomes.append((uid, int(i == winner)))
+    S.upsert_markets(engine, rows)
+    S.insert_quotes(engine, quotes)
+    S.insert_preds(engine, preds)
+    S.settle_markets(engine, outcomes)
+
+
+def test_event_scores_normalize_market_ladder(engine):
+    # market mids sum to 1.2 (overround); they are normalized before scoring
+    _event(engine, probs_model=[0.1, 0.8, 0.1], probs_market=[0.24, 0.72, 0.24], winner=1)
+    frame = V.event_frame(engine, venue="kalshi", model="m1", lead_points=[LEAD],
+                          tz_for_city={"New York": "America/New_York"})
     assert len(frame) == 1
-    assert frame[0]["lead_hours"] == 24
+    ev = frame[0]
+    assert ev["market_probs"] == pytest.approx([0.2, 0.6, 0.2])
+    # multi-category Brier: sum over buckets of (p - o)^2
+    assert ev["model_brier"] == pytest.approx(0.01 + 0.04 + 0.01)
+    assert ev["market_brier"] == pytest.approx(0.04 + 0.16 + 0.04)
+    assert ev["model_logscore"] == pytest.approx(-math.log(0.8))
+
+
+def test_snapshots_after_the_lead_point_are_never_used(engine):
+    # A quote taken after the lead time would leak information. No as-of data -> no row.
+    _event(engine, probs_model=[0.1, 0.8, 0.1], probs_market=[0.2, 0.6, 0.2], winner=1,
+           quote_ts=POINT_TS + 60)
+    assert V.event_frame(engine, venue="kalshi", model="m1", lead_points=[LEAD],
+                         tz_for_city={"New York": "America/New_York"}) == []
+
+
+def test_stale_snapshots_beyond_tolerance_are_dropped(engine):
+    _event(engine, probs_model=[0.1, 0.8, 0.1], probs_market=[0.2, 0.6, 0.2], winner=1,
+           pred_ts=POINT_TS - 3 * 3600)
+    assert V.event_frame(engine, venue="kalshi", model="m1", lead_points=[LEAD],
+                         tz_for_city={"New York": "America/New_York"}, tolerance_s=2 * 3600) == []
+
+
+def test_incomplete_ladder_is_not_scored(engine):
+    _event(engine, probs_model=[0.1, 0.8, 0.1], probs_market=[0.2, 0.6, 0.2], winner=1)
+    # drop one bucket's quote by settling a fourth, unquoted bucket into the same event
+    S.upsert_markets(engine, [market("kalshi:EV1-3", event_key="EV1", bucket_lo=78.0,
+                                     bucket_hi=79.0)])
+    S.settle_markets(engine, [("kalshi:EV1-3", 0)])
+    assert V.event_frame(engine, venue="kalshi", model="m1", lead_points=[LEAD],
+                         tz_for_city={"New York": "America/New_York"}) == []
+
+
+def test_probability_floor_bounds_log_score(engine):
+    _event(engine, probs_model=[0.0, 0.0, 1.0], probs_market=[0.2, 0.6, 0.2], winner=1)
+    ev = V.event_frame(engine, venue="kalshi", model="m1", lead_points=[LEAD],
+                       tz_for_city={"New York": "America/New_York"})[0]
+    assert ev["model_logscore"] == pytest.approx(-math.log(V.PROB_FLOOR))
+
+
+def test_rps_rewards_near_misses():
+    # winner is bucket 1; putting mass on the adjacent bucket beats the far one
+    near = V.rps([0.0, 0.0, 1.0, 0.0], winner=1)
+    far = V.rps([0.0, 0.0, 0.0, 1.0], winner=1)
+    assert near < far
+    assert V.rps([0.0, 1.0, 0.0, 0.0], winner=1) == 0.0
+
+
+def test_summary_bootstraps_paired_difference_by_event():
+    events = [{"lead": "L", "model_brier": 0.2, "market_brier": 0.3, "model_rps": 0.1,
+               "market_rps": 0.15, "model_logscore": 1.0, "market_logscore": 1.2}
+              for _ in range(50)]
+    s = V.summarize(events, n_boot=200, seed=1)[0]
+    assert s["n_events"] == 50
+    assert s["brier_diff"] == pytest.approx(-0.1)
+    # identical events -> zero-width interval around the difference
+    assert s["brier_diff_ci"] == pytest.approx([-0.1, -0.1])
+
+
+def test_calibration_pairs_use_normalized_probs():
+    events = [{"model_probs": [0.1, 0.9], "market_probs": [0.3, 0.7], "outcomes": [0, 1]}]
+    model_pairs, market_pairs = V.calibration_pairs(events)
+    assert model_pairs == [(0.1, 0), (0.9, 1)]
+    assert market_pairs == [(0.3, 0), (0.7, 1)]
+
 
 def test_brier_and_log_loss():
     assert V.brier(0.7, 1) == pytest.approx(0.09)
-    assert V.brier(0.7, 0) == pytest.approx(0.49)
     assert V.log_loss(0.8, 1) == pytest.approx(-math.log(0.8))
 
-def test_calibration_curve_buckets_and_winrate():
-    pairs = [(0.1, 0), (0.15, 0), (0.85, 1), (0.9, 1)]
-    curve = V.calibration_curve(pairs, bins=2)
-    lo, hi = curve[0], curve[-1]
-    assert lo["n"] == 2 and lo["win_rate"] == 0.0
-    assert hi["n"] == 2 and hi["win_rate"] == 1.0
 
-def test_score_by_lead_time_compares_model_vs_market(tmp_path):
-    conn = verify_db.connect(str(tmp_path / "v.sqlite3"))
-    uid = "kalshi:T1"
-    verify_db.upsert_market(conn, {
-        "market_uid": uid, "venue": "kalshi", "external_id": "T1", "city": "NYC",
-        "target_date": "2026-06-22", "bucket_lo": 75.0, "bucket_hi": 76.0, "unit": "F",
-        "question": "q", "close_ts": 1000.0})
-    verify_db.insert_quote(conn, uid, ts=1000.0 - 48*3600, market_prob=0.50, best_bid=0.48, best_ask=0.52)
-    verify_db.insert_pred(conn, uid, ts=1000.0 - 48*3600, model_prob=0.80, lead_hours=48.0)
-    verify_db.settle_market(conn, uid, outcome=1)  # YES happened; model was closer
-    scored = V.score_by_lead_time(conn, lead_buckets=(48,))
-    row = scored[0]
-    assert row["lead_hours"] == 48 and row["n"] == 1
-    assert row["model_brier"] < row["market_brier"]
+def test_calibration_curve_buckets_and_winrate():
+    curve = V.calibration_curve([(0.1, 0), (0.15, 0), (0.85, 1), (0.9, 1)], bins=2)
+    assert curve[0]["n"] == 2 and curve[0]["win_rate"] == 0.0
+    assert curve[-1]["n"] == 2 and curve[-1]["win_rate"] == 1.0

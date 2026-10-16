@@ -2,8 +2,7 @@
 
 The day's high is physically monotone: once the station has observed
 T, the settled max cannot be below T. Buckets below the running max
-are dead; quotes that haven't repriced are free edge. After the
-afternoon peak (lock_hour_local), the max is effectively final.
+can't win. After the afternoon peak (lock_hour_local), the max is effectively final.
 """
 
 from datetime import datetime, timedelta
@@ -11,8 +10,9 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from weather_vs_market import USER_AGENT
+
 NWS_BASE = "https://api.weather.gov"
-UA = {"User-Agent": "weather-vs-market/0.2 (github.com/Bensidebotham/weather-vs-market; bensidebotham89@gmail.com)"}
 
 
 def get_running_max(station: str, tz: str, target_date: str, unit: str = "F") -> float | None:
@@ -25,7 +25,7 @@ def get_running_max(station: str, tz: str, target_date: str, unit: str = "F") ->
     day_start = datetime.strptime(target_date, "%Y-%m-%d").replace(tzinfo=zone)
     start_utc = (day_start - timedelta(hours=1)).isoformat()
     try:
-        with httpx.Client(headers=UA, timeout=20) as client:
+        with httpx.Client(headers=USER_AGENT, timeout=20) as client:
             resp = client.get(
                 f"{NWS_BASE}/stations/{station}/observations",
                 params={"start": start_utc, "limit": 200},

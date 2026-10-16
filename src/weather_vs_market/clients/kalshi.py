@@ -7,6 +7,7 @@ from datetime import datetime
 
 import httpx
 
+from weather_vs_market import http
 from weather_vs_market.model.kalshi_buckets import parse_kalshi_strike
 
 BASE = "https://api.elections.kalshi.com/trade-api/v2"
@@ -93,9 +94,7 @@ def fetch_markets(series_ticker: str, status: str = "open",
             params = {"series_ticker": series_ticker, "status": status, "limit": 1000}
             if cursor:
                 params["cursor"] = cursor
-            r = client.get(f"{BASE}/markets", params=params)
-            r.raise_for_status()
-            body = r.json()
+            body = http.get(client, f"{BASE}/markets", params).json()
             page = body.get("markets", [])
             markets += page
             cursor = body.get("cursor") or ""

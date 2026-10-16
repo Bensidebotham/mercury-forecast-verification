@@ -5,6 +5,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from weather_vs_market import http
 from weather_vs_market.forecast import previous_runs as pr
 
 FIX = Path(__file__).parent / "fixtures"
@@ -19,7 +20,7 @@ def load(name):
 
 @pytest.fixture(autouse=True)
 def no_sleep(monkeypatch):
-    monkeypatch.setattr(pr.time, "sleep", lambda s: None)
+    monkeypatch.setattr(http.time, "sleep", lambda s: None)
 
 
 def client_for(handler):

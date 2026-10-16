@@ -20,58 +20,23 @@ exponential backoff. One request returns at most 5000 candles (more is a 400).
 Measured 2026-10-16: all 7.5k KXHIGHMIA markets in 10 requests (~2 s);
 hourly candles for 100 markets in ~24 s, with 3 retried 429s.
 """
-import time
-from collections.abc import Iterator
-from contextlib import contextmanager
 from datetime import datetime
 
 import httpx
 
+from weather_vs_market import http
+
 BASE = "https://api.elections.kalshi.com/trade-api/v2"
-UA = {"User-Agent": "weather-vs-market/0.3 (github.com/Bensidebotham/weather-vs-market)"}
 MAX_CANDLES = 5000
 MAX_TRIES = 5
 BACKOFF_S = 1.0
 MIN_INTERVAL_S = 0.2  # ~5 req/s, under the observed ~7 req/s limit
 
-_last_request = 0.0
+_PACER = http.Pacer(MIN_INTERVAL_S)
 
 
-@contextmanager
-def _session(client: httpx.Client | None) -> Iterator[httpx.Client]:
-    if client is not None:
-        yield client
-        return
-    with httpx.Client(timeout=30) as own:
-        yield own
-
-
-def _pace() -> None:
-    global _last_request
-    wait = MIN_INTERVAL_S - (time.monotonic() - _last_request)
-    if wait > 0:
-        time.sleep(wait)
-    _last_request = time.monotonic()
-
-
-def _get_json(client: httpx.Client, url: str, params: dict | None = None) -> dict:
-    """GET with retries on 429/5xx/transport errors; other 4xx raise at once."""
-    for attempt in range(MAX_TRIES):
-        _pace()
-        last = attempt == MAX_TRIES - 1
-        try:
-            resp = client.get(url, params=params, headers=UA)
-        except httpx.TransportError:
-            if last:
-                raise
-            time.sleep(BACKOFF_S * 2**attempt)
-            continue
-        if (resp.status_code == 429 or resp.status_code >= 500) and not last:
-            time.sleep(BACKOFF_S * 2**attempt)
-            continue
-        resp.raise_for_status()
-        return resp.json()
-    raise AssertionError("unreachable")
+def _get_json(client: httpx.Client, url: str, params=None):
+    return http.get(client, url, params, pacer=_PACER, max_tries=MAX_TRIES, backoff_s=BACKOFF_S).json()
 
 
 def _ts(iso: str) -> float:
@@ -80,7 +45,7 @@ def _ts(iso: str) -> float:
 
 def fetch_cutoff(client: httpx.Client | None = None) -> float:
     """Epoch seconds of the historical/live split for settled markets."""
-    with _session(client) as c:
+    with http.session(client) as c:
         return _ts(_get_json(c, f"{BASE}/historical/cutoff")["market_settled_ts"])
 
 
@@ -103,7 +68,7 @@ def fetch_settled_markets(series: str, client: httpx.Client | None = None) -> li
     cap_strike, open_time, close_time, settlement_ts, result, ...). Pre-2024
     markets may have null strike fields; their bucket is in the title only.
     """
-    with _session(client) as c:
+    with http.session(client) as c:
         hist = _paginate(c, "/historical/markets", {"series_ticker": series, "limit": 1000})
         live = _paginate(c, "/markets", {"series_ticker": series, "status": "settled", "limit": 1000})
     by_ticker = {m["ticker"]: m for m in hist}
@@ -157,7 +122,7 @@ def fetch_hourly_quotes(series: str, ticker: str, start_ts: int, end_ts: int, hi
     path = (f"/historical/markets/{ticker}/candlesticks" if historical
             else f"/series/{series}/markets/{ticker}/candlesticks")
     by_ts: dict[int, dict] = {}
-    with _session(client) as c:
+    with http.session(client) as c:
         for lo, hi in _windows(int(start_ts), int(end_ts), 3600):
             payload = _get_json(c, f"{BASE}{path}",
                                 {"start_ts": lo, "end_ts": hi, "period_interval": 60})

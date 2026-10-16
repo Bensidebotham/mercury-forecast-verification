@@ -27,47 +27,23 @@ between chunks to stay well under 600/min.
 """
 import time
 from collections import defaultdict
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
 
+from weather_vs_market import http
+
 PREVIOUS_RUNS_BASE = "https://previous-runs-api.open-meteo.com/v1/forecast"
-UA = {"User-Agent": "weather-vs-market/0.3 (github.com/Bensidebotham/weather-vs-market)"}
 CHUNK_DAYS = 366
 PAUSE_S = 6.0  # ~26-36 weighted calls per chunk -> <=360 calls/min
 MAX_TRIES = 5
 BACKOFF_S = 2.0
 
 
-@contextmanager
-def _session(client: httpx.Client | None) -> Iterator[httpx.Client]:
-    if client is not None:
-        yield client
-        return
-    with httpx.Client(timeout=120) as own:
-        yield own
-
-
-def _get_json(client: httpx.Client, url: str, params: dict) -> dict:
-    """GET with retries on 429/5xx/transport errors; other 4xx raise at once."""
-    for attempt in range(MAX_TRIES):
-        last = attempt == MAX_TRIES - 1
-        try:
-            resp = client.get(url, params=params, headers=UA)
-        except httpx.TransportError:
-            if last:
-                raise
-            time.sleep(BACKOFF_S * 2**attempt)
-            continue
-        if (resp.status_code == 429 or resp.status_code >= 500) and not last:
-            time.sleep(BACKOFF_S * 2**attempt)
-            continue
-        resp.raise_for_status()
-        return resp.json()
-    raise AssertionError("unreachable")
+def _get_json(client: httpx.Client, url: str, params=None):
+    return http.get(client, url, params, max_tries=MAX_TRIES, backoff_s=BACKOFF_S).json()
 
 
 def _variable(lead: int) -> str:
@@ -144,7 +120,7 @@ def fetch_daily_max_by_lead(lat: float, lon: float, tz: str, start_date: str, en
     """(local date, model, lead_days) -> forecast daily max (°F) over [start_date, end_date]."""
     first, last = date.fromisoformat(start_date), date.fromisoformat(end_date)
     out: dict[tuple[str, str, int], float] = {}
-    with _session(client) as c:
+    with http.session(client) as c:
         for i, (lo, hi) in enumerate(_chunks(first, last)):
             if i:
                 time.sleep(PAUSE_S)

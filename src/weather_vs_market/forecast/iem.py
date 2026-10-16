@@ -16,64 +16,29 @@ at 1,000 station-years, so we pace at 1 s and never need to chunk one station.
 """
 import csv
 import io
-import time
-from collections.abc import Iterator
-from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
 
+from weather_vs_market import http
+
 IEM_BASE = "https://mesonet.agron.iastate.edu"
 CLI_URL = f"{IEM_BASE}/json/cli.py"
 ASOS_URL = f"{IEM_BASE}/cgi-bin/request/asos.py"
-UA = {"User-Agent": "weather-vs-market/0.3 (github.com/Bensidebotham/weather-vs-market)"}
 ROUTINE, SPECIAL = 3, 4
 MIN_INTERVAL_S = 1.0
 MAX_TRIES = 5
 BACKOFF_S = 2.0
 
-_last_request = 0.0
+# --- NWS CLI daily highs ------------------------------------------------------
 
-
-@contextmanager
-def _session(client: httpx.Client | None) -> Iterator[httpx.Client]:
-    if client is not None:
-        yield client
-        return
-    with httpx.Client(timeout=120) as own:
-        yield own
-
-
-def _pace() -> None:
-    global _last_request
-    wait = MIN_INTERVAL_S - (time.monotonic() - _last_request)
-    if wait > 0:
-        time.sleep(wait)
-    _last_request = time.monotonic()
+_PACER = http.Pacer(MIN_INTERVAL_S)
 
 
 def _get(client: httpx.Client, url: str, params) -> httpx.Response:
-    """GET with retries on 429/5xx/transport errors; other 4xx raise at once."""
-    for attempt in range(MAX_TRIES):
-        _pace()
-        last = attempt == MAX_TRIES - 1
-        try:
-            resp = client.get(url, params=params, headers=UA)
-        except httpx.TransportError:
-            if last:
-                raise
-            time.sleep(BACKOFF_S * 2**attempt)
-            continue
-        if (resp.status_code == 429 or resp.status_code >= 500) and not last:
-            time.sleep(BACKOFF_S * 2**attempt)
-            continue
-        resp.raise_for_status()
-        return resp
-    raise AssertionError("unreachable")
+    return http.get(client, url, params, pacer=_PACER, max_tries=MAX_TRIES, backoff_s=BACKOFF_S)
 
-
-# --- NWS CLI daily highs ------------------------------------------------------
 
 def _issued_utc(product: str) -> datetime | None:
     """CLI product ids start with the UTC issue time: "202610162033-KOKX-CDUS41-CLINYC"."""
@@ -110,7 +75,7 @@ def parse_cli_highs(payload: dict, tz: str | None = None) -> dict[str, int]:
 def fetch_cli_highs(station: str, year: int, client: httpx.Client | None = None,
                     *, tz: str | None = None) -> dict[str, int]:
     """CLI daily highs for a 4-letter station (KNYC, KMDW, KLGA, ...) and year."""
-    with _session(client) as c:
+    with http.session(client) as c:
         payload = _get(c, CLI_URL, {"station": station, "year": year}).json()
     return parse_cli_highs(payload, tz)
 
@@ -152,5 +117,5 @@ def fetch_hourly_temps(station: str, start_date: str, end_date: str, tz: str,
         ("year2", stop.year), ("month2", stop.month), ("day2", stop.day),
         ("report_type", ROUTINE), ("report_type", SPECIAL),
     ]
-    with _session(client) as c:
+    with http.session(client) as c:
         return parse_asos_csv(_get(c, ASOS_URL, params).text)

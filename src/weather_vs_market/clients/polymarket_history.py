@@ -24,16 +24,14 @@ longer than 15 days are rejected with a 400, so longer ranges are chunked.
 """
 import json
 import re
-import time
-from collections.abc import Iterator
-from contextlib import contextmanager
 from datetime import date, datetime
 
 import httpx
 
+from weather_vs_market import http
+
 GAMMA_BASE = "https://gamma-api.polymarket.com"
 CLOB_BASE = "https://clob.polymarket.com"
-UA = {"User-Agent": "weather-vs-market/0.3 (github.com/Bensidebotham/weather-vs-market)"}
 CITY_SERIES = {
     "nyc": "nyc-daily-weather", "chicago": "chicago-daily-weather", "miami": "miami-daily-weather",
     "los-angeles": "los-angeles-daily-weather", "san-francisco": "san-francisco-daily-weather",
@@ -54,32 +52,8 @@ _SITE_RE = re.compile(r"[?&]site=([A-Za-z0-9]{3,5})\b")
 _WU_RE = re.compile(r"wunderground\.com/[\w/-]*?/([A-Z0-9]{4})\b")
 
 
-@contextmanager
-def _session(client: httpx.Client | None) -> Iterator[httpx.Client]:
-    if client is not None:
-        yield client
-        return
-    with httpx.Client(timeout=30) as own:
-        yield own
-
-
-def _get_json(client: httpx.Client, url: str, params: dict | None = None):
-    """GET with retries on 429/5xx/transport errors; other 4xx raise at once."""
-    for attempt in range(MAX_TRIES):
-        last = attempt == MAX_TRIES - 1
-        try:
-            resp = client.get(url, params=params, headers=UA)
-        except httpx.TransportError:
-            if last:
-                raise
-            time.sleep(BACKOFF_S * 2**attempt)
-            continue
-        if (resp.status_code == 429 or resp.status_code >= 500) and not last:
-            time.sleep(BACKOFF_S * 2**attempt)
-            continue
-        resp.raise_for_status()
-        return resp.json()
-    raise AssertionError("unreachable")
+def _get_json(client: httpx.Client, url: str, params=None):
+    return http.get(client, url, params, max_tries=MAX_TRIES, backoff_s=BACKOFF_S).json()
 
 
 def _iso_ts(raw: str | None) -> float | None:
@@ -106,14 +80,14 @@ def candidate_slugs(city_slug: str, d: date) -> list[str]:
 
 
 def fetch_event(slug: str, client: httpx.Client | None = None) -> dict | None:
-    with _session(client) as c:
+    with http.session(client) as c:
         events = _get_json(c, f"{GAMMA_BASE}/events", {"slug": slug})
     return events[0] if events else None
 
 
 def find_event(city_slug: str, d: date, client: httpx.Client | None = None) -> dict | None:
     """First candidate-slug event whose title date is d (no-year slugs can hit another year)."""
-    with _session(client) as c:
+    with http.session(client) as c:
         for slug in candidate_slugs(city_slug, d):
             ev = fetch_event(slug, client=c)
             if ev and event_date(ev) == d:
@@ -124,7 +98,7 @@ def find_event(city_slug: str, d: date, client: httpx.Client | None = None) -> d
 def fetch_series_events(series_slug: str, client: httpx.Client | None = None) -> list[dict]:
     """Every event in a Gamma series (e.g. "nyc-daily-weather"), markets included."""
     out: list[dict] = []
-    with _session(client) as c:
+    with http.session(client) as c:
         while True:
             page = _get_json(c, f"{GAMMA_BASE}/events",
                              {"series_slug": series_slug, "limit": PAGE, "offset": len(out)})
@@ -209,7 +183,7 @@ def fetch_price_history(token: str, start_ts: int, end_ts: int, fidelity: int = 
                         client: httpx.Client | None = None) -> list[tuple[int, float]]:
     """(ts, YES price) points for one token, chunked into <=15-day windows."""
     points: dict[int, float] = {}
-    with _session(client) as c:
+    with http.session(client) as c:
         lo = int(start_ts)
         while lo < end_ts:
             hi = min(lo + MAX_WINDOW_S, int(end_ts))

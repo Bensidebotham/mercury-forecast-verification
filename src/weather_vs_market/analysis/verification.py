@@ -93,9 +93,9 @@ def event_frame(engine: Engine, *, venue: str, model: str, lead_points: list[Lea
     markets = [m for m in store.read_markets(engine, store.vmarket.c.venue == venue)
                if m["settled"]]
     quotes, preds = defaultdict(list), defaultdict(list)
-    for q in store.read_quotes(engine):
-        if quote_sources is None or q["source"] in quote_sources:
-            quotes[q["market_uid"]].append((q["ts"], q["market_prob"]))
+    where = [store.vquote.c.source.in_(quote_sources)] if quote_sources else []
+    for q in store.read_quotes(engine, *where):
+        quotes[q["market_uid"]].append((q["ts"], q["market_prob"]))
     for p in store.read_preds(engine, store.vpred.c.model == model):
         preds[p["market_uid"]].append((p["ts"], p["model_prob"]))
 
@@ -148,7 +148,7 @@ def event_frame(engine: Engine, *, venue: str, model: str, lead_points: list[Lea
 _METRICS = ("brier", "rps", "logscore")
 
 
-def _mean(xs: list[float]) -> float:
+def mean(xs: list[float]) -> float:
     return sum(xs) / len(xs)
 
 
@@ -170,11 +170,11 @@ def summarize(events: list[dict], n_boot: int = 2000, seed: int = 0) -> list[dic
         for _ in range(n_boot):
             idx = [rng.randrange(n) for _ in range(n)]
             for k in _METRICS:
-                boots[k].append(_mean([diffs[k][i] for i in idx]))
+                boots[k].append(mean([diffs[k][i] for i in idx]))
         for k in _METRICS:
-            row[f"model_{k}"] = _mean([r[f"model_{k}"] for r in rows])
-            row[f"market_{k}"] = _mean([r[f"market_{k}"] for r in rows])
-            row[f"{k}_diff"] = _mean(diffs[k])
+            row[f"model_{k}"] = mean([r[f"model_{k}"] for r in rows])
+            row[f"market_{k}"] = mean([r[f"market_{k}"] for r in rows])
+            row[f"{k}_diff"] = mean(diffs[k])
             b = sorted(boots[k])
             row[f"{k}_diff_ci"] = [b[int(0.025 * (n_boot - 1))], b[int(0.975 * (n_boot - 1))]]
         out.append(row)

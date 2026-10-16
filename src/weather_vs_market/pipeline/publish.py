@@ -18,7 +18,7 @@ from weather_vs_market.pipeline.ingest import ENSEMBLE_MODEL
 from weather_vs_market.storage import store
 
 SCHEMA_VERSION = 2
-BACKTEST_RESULTS = ROOT / "results" / "backtest.json"
+BACKTEST_RESULTS = ROOT / "results" / "backtest_test.json"
 
 
 def lead_points(settings: Settings) -> list[V.LeadPoint]:

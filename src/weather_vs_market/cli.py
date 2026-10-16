@@ -58,6 +58,53 @@ def dump(out: str = typer.Option("data/dump", help="Directory for the Parquet fi
 
 
 @app.command()
+def fit():
+    """Fit det_gauss_v1 on the training window and freeze it in config/."""
+    from weather_vs_market.pipeline.fit import PARAMS_FILE, run_fit
+    doc = run_fit(load_settings())
+    rprint(f"wrote {len(doc['params'])} (station, lead) fits -> {PARAMS_FILE}")
+
+
+backtest_app = typer.Typer(no_args_is_help=True, help="Retroactive backtest (see docs/PROTOCOL.md).")
+app.add_typer(backtest_app, name="backtest")
+
+
+def _window(name: str) -> tuple[str, str]:
+    from weather_vs_market.pipeline.backtest import TEST
+    from weather_vs_market.pipeline.fit import TRAIN
+    windows = {"train": TRAIN, "test": TEST, "dev": ("2025-04-01", "2025-06-30")}
+    return windows[name]
+
+
+@backtest_app.command("collect")
+def backtest_collect(venue: str = typer.Argument(..., help="kalshi | polymarket"),
+                     window: str = typer.Option("test", help="train | dev | test")):
+    """Settled ladders, results and lead-point prices for a window."""
+    from weather_vs_market.pipeline import backtest as B
+    fn = {"kalshi": B.collect_kalshi, "polymarket": B.collect_polymarket}[venue]
+    rprint(fn(load_settings(), _engine(), *_window(window)))
+
+
+@backtest_app.command("forecast")
+def backtest_forecast(window: str = typer.Option("test", help="train | dev | test")):
+    """det_gauss_v1 probabilities at each lead point for stored ladders."""
+    from weather_vs_market.pipeline.backtest import forecast
+    rprint(forecast(load_settings(), _engine(), *_window(window)))
+
+
+@backtest_app.command("score")
+def backtest_score(window: str = typer.Option("test", help="dev | test")):
+    """Score a window per the protocol and write results/backtest_<window>.json."""
+    from weather_vs_market.pipeline.backtest import score
+    doc = score(load_settings(), _engine(), _window(window), window)
+    for venue, v in doc["venues"].items():
+        for r in v["summary"]:
+            lo, hi = r["brier_diff_ci"]
+            rprint(f"{venue:10} {r['lead']:9} n={r['n_events']:4}  Brier model {r['model_brier']:.4f}"
+                   f" market {r['market_brier']:.4f}  diff {r['brier_diff']:+.4f} [{lo:+.4f}, {hi:+.4f}]")
+
+
+@app.command()
 def report():
     """Live ensemble model vs. market, per venue and lead point."""
     from weather_vs_market.pipeline.publish import live_scores

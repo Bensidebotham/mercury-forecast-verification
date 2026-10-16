@@ -32,6 +32,9 @@ how often the CLI high falls in Kalshi's winning bucket.
 - **Train:** target dates 2024-01-01 to 2025-06-30. Model parameters are fit here only.
 - **Test:** target dates 2025-07-01 to 2026-09-30. Scored once, with frozen parameters.
 - **Forward:** target dates from 2026-10-01, scored the same way as data arrives.
+- **Dev:** 2025-04-01 to 2025-06-30, a slice of the training window used only to
+  debug the pipeline end to end before the test run. Its scores are in-sample and
+  are never reported as results.
 
 ## Lead points and leakage
 

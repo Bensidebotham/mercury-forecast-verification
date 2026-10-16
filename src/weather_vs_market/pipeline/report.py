@@ -25,23 +25,53 @@ def _scored(doc: dict):
             yield venue, v, r
 
 
+_METRICS = ("brier", "rps", "logscore")
+
+
+def _direction(rows: list[dict], metric: str) -> str:
+    """'market' / 'model' if every lead's interval excludes zero the same way, else 'mixed'/'none'."""
+    market = all(r[f"{metric}_diff_ci"][0] > 0 for r in rows)
+    model = all(r[f"{metric}_diff_ci"][1] < 0 for r in rows)
+    clear = any(r[f"{metric}_diff_ci"][0] > 0 or r[f"{metric}_diff_ci"][1] < 0 for r in rows)
+    return "market" if market else "model" if model else "mixed" if clear else "none"
+
+
+def _month(iso: str) -> str:
+    from datetime import date
+    return date.fromisoformat(iso).strftime("%b %Y")
+
+
+_VERDICT = {"market": "the market was more accurate than the model at every lead time",
+            "model": "the model was more accurate than the market at every lead time",
+            "mixed": "the result differed by lead time",
+            "none": "there was no clear difference between model and market"}
+
+
 def headline(doc: dict) -> str:
-    parts = []
+    venues = []
     for venue, v in doc["venues"].items():
-        if not v["summary"]:
+        rows = v["summary"]
+        if not rows:
             continue
-        n = max(r["n_events"] for r in v["summary"])
-        market = all(r["brier_diff_ci"][0] > 0 for r in v["summary"])
-        model = all(r["brier_diff_ci"][1] < 0 for r in v["summary"])
-        clear = [r for r in v["summary"] if r["brier_diff_ci"][0] > 0 or r["brier_diff_ci"][1] < 0]
-        verdict = ("the market was more accurate than the model at every lead time" if market else
-                   "the model was more accurate than the market at every lead time" if model else
-                   "there was no clear difference between model and market" if not clear else
-                   "the result differed by lead time")
-        span = " to ".join(v["date_span"]) if v["date_span"] else ""
-        parts.append(f"On {n:,} {VENUES.get(venue, venue)} city-days ({span}), {verdict}")
-    return ". ".join(parts) + ". Judged by Brier score with 95% paired bootstrap intervals; " \
-        "see the table below and [docs/RESULTS.md](docs/RESULTS.md)."
+        ns = sorted(r["n_events"] for r in rows)
+        n = f"{ns[0]:,}" if ns[0] == ns[-1] else f"{ns[0]:,}–{ns[-1]:,}"
+        brier = _direction(rows, "brier")
+        all_scores = brier in ("market", "model") and all(_direction(rows, m) == brier for m in _METRICS)
+        venues.append((VENUES.get(venue, venue), n, brier, all_scores, v["date_span"]))
+    if not venues:
+        return "No test-window events have been scored yet."
+    spans = [s for *_, s in venues if s]
+    when = f" ({_month(min(s[0] for s in spans))} – {_month(max(s[1] for s in spans))})" if spans else ""
+    tail = (" Every comparison uses a 95% paired bootstrap interval over city-days; see the table below "
+            "and [docs/RESULTS.md](docs/RESULTS.md).")
+    if len({(b, a) for _, _, b, a, _ in venues}) == 1:
+        _, _, brier, all_scores, _ = venues[0]
+        counts = " and ".join(f"{name} ({n} city-days per lead time)" for name, n, *_ in venues)
+        scores = "on Brier, RPS and log score alike" if all_scores else "on Brier score"
+        return f"**Out of sample{when}, {_VERDICT[brier]}, on {counts}, {scores}.**" + tail
+    parts = [f"{name} ({n} city-days per lead time): {_VERDICT[b]}" + ("" if a else " on Brier score")
+             for name, n, b, a, _ in venues]
+    return f"**Out of sample{when}:** " + "; ".join(parts) + "." + tail
 
 
 def results_table(doc: dict) -> str:
@@ -62,7 +92,7 @@ def full_report(doc: dict) -> str:
         f"{doc['train_window'][0]} to {doc['train_window'][1]} only.",
         f"- Code version: `{(doc.get('git_sha') or 'unknown')[:7]}`. "
         "Protocol: [PROTOCOL.md](PROTOCOL.md).", "",
-        "## Summary", "", headline(doc).replace("docs/RESULTS.md", "RESULTS.md"), "",
+        "## Summary", "", headline(doc).split(" Every comparison")[0], "",
         "## All scores", "",
         "Per city-day means; lower is better for all three. Differences are model − market.", "",
         "| Venue | Lead | City-days | Brier (model / market) | Brier diff | RPS diff | Log-score diff |",
